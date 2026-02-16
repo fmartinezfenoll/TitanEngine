@@ -1,0 +1,23 @@
+# Build output
+/build/
+
+# Object files
+*.o
+*.obj
+*.a
+*.lib
+*.dll
+*.exe
+
+# Dependency files
+*.d
+
+# VSCode
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
