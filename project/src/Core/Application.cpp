@@ -1,27 +1,77 @@
 #include "Core/Application.h"
+#include "Core/Time.h"
 #include "Renderer/RendererFactory.h"
 #include "Renderer/IRenderer.h"
-
 #include <iostream>
 
+// ==============================
+// Basic functions
+// ==============================
+Application::Application(const AppConfig& config)
+    : m_config(config)
+{
+}
 
-Application::Application() = default;
-Application::~Application() = default;
+Application::~Application()
+{
+    Shutdown();
+}
+
+// ==============================
+// Main Loop
+// ==============================
+bool Application::Init()
+{
+    switch (m_config.API)
+    {
+        case RendererAPI::OpenGL:
+            m_renderer = RendererFactory::Instance().Create("opengl");
+            break;
+
+        case RendererAPI::Vulkan:
+            m_renderer = RendererFactory::Instance().Create("vulkan");
+            break;
+    }
+
+    if (!m_renderer)
+    {
+        std::cout << "[ERROR] Renderer creation failed\n";
+        return false;
+    }
+
+    if (!m_renderer->Init(m_config.Width, m_config.Height, m_config.AppName))
+    {
+        std::cout << "[ERROR] Renderer initialization failed\n";
+        return false;
+    }
+
+    return true;
+}
 
 void Application::Run()
 {
-    m_renderer = RendererFactory::Instance().Create("opengl");
+    double lastTime = Time::GetTime();
 
-    if (!m_renderer->Init(1920, 1080, "Engine"))
+    while (!m_renderer->ShouldClose())
     {
-        std::cout << "[ERROR] Renderer init failed" << std::endl;
-        return;
-    }
+        double currentTime = Time::GetTime();
+        float deltaTime = static_cast<float>(currentTime - lastTime);
+        lastTime = currentTime;
 
-    while (true)
-    {
+        Update(deltaTime);
         m_renderer->Render();
     }
-
-    m_renderer->Shutdown();
 }
+void Application::Update(float deltaTime)
+{
+    
+}
+
+
+void Application::Shutdown()
+{
+    if (m_renderer)
+        m_renderer->Shutdown();
+}
+
+

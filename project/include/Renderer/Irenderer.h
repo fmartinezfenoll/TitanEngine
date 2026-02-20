@@ -16,7 +16,7 @@ public:
 
     virtual void ImGuiNewFrame() {}
     virtual void* GetWindow() const { return nullptr; }
-
+    virtual bool ShouldClose() const { return false; }
     void SetEntitiesReference(std::vector<TNodo*>* entitiesRef);
 
 protected:

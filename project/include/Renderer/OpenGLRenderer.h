@@ -18,6 +18,8 @@ public:
     void ImGuiNewFrame() override;
     void* GetWindow() const override;
 
+    bool ShouldClose() const;
+
 private:
     void* window = nullptr; // Stored as void* to avoid exposing GLFW in header
 };

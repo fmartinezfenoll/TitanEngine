@@ -40,7 +40,11 @@ THIRDPARTY_LIB := $(BUILD_DIR)/libthirdparty.a
 # FLAGS
 # ==============================
 
-INCLUDE := -Iinclude -Iexternal -Ithirdparty
+INCLUDE := -Iinclude \
+           -Iexternal \
+           -Ithirdparty \
+           -Ithirdparty/glfw/include
+
 
 CXXFLAGS := -std=c++20 -Wall -Wextra -MMD -MP \
             -DIMGUI_IMPL_OPENGL_LOADER_GLAD \
@@ -51,6 +55,7 @@ CXXFLAGS := -std=c++20 -Wall -Wextra -MMD -MP \
 EXTFLAGS := -std=c++20 -w $(OPTFLAGS) $(INCLUDE)
 
 LDFLAGS :=
+LIBPATH :=
 LIBS :=
 
 UNAME_S := $(shell uname -s)
@@ -73,6 +78,7 @@ endif
 # ==============================
 
 ifeq ($(OS), Windows_NT)
+    LIBPATH := -Lthirdparty/glfw/lib
     LIBS := -lglfw3 -lopengl32 -lgdi32 -luser32 -lkernel32 -lshell32 -lwinmm
     RUN := $(BIN).exe
 
@@ -80,6 +86,7 @@ ifeq ($(OS), Windows_NT)
         LDFLAGS += -static -static-libgcc -static-libstdc++
     endif
 endif
+
 
 # ==============================
 # TARGETS
