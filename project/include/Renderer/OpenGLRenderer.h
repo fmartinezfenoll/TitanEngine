@@ -18,7 +18,6 @@ public:
 
     void EndFrame();
 
-    void ImGuiNewFrame() override;
     void* GetWindow() const override;
 
     void PollEvents() override;
@@ -28,4 +27,5 @@ public:
 private:
     void* window = nullptr; // Stored as void* to avoid exposing GLFW in header
     unsigned int m_VAO = 0;
+    unsigned int m_VBO = 0;
 };

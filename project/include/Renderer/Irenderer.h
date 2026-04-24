@@ -4,7 +4,7 @@
 #include <vector>
 #include <memory>
 
-class TNodo;
+class TNode;
 
 class IRenderer {
 public:
@@ -14,7 +14,6 @@ public:
     virtual void Shutdown() = 0;
 
 
-    virtual void ImGuiNewFrame() {}
     virtual void* GetWindow() const { return nullptr; }
     virtual bool ShouldClose() const { return false; }
 
@@ -22,8 +21,8 @@ public:
     virtual void BeginFrame() = 0;
     virtual void Render() = 0;
     virtual void EndFrame() = 0;
-    void SetEntitiesReference(std::vector<TNodo*>* entitiesRef);
+    void SetEntitiesReference(std::vector<TNode*>* entitiesRef);
 
 protected:
-    std::vector<TNodo*>* entities = nullptr;
+    std::vector<TNode*>* entities = nullptr;
 };

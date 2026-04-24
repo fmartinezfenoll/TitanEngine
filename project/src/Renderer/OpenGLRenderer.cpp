@@ -2,11 +2,24 @@
 #include "Renderer/RendererFactory.h"
 #include "ResourceManager/ResourceManager.h"
 #include "ResourceManager/OpenGLShader.h"
+#include "Scene/SceneManager.h"
+#include "Scene/Scene.h"
+#include "Scene/TNode.h"
 
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
+#include <imgui.h>
 
 #include <iostream>
+
+// ImGui backend function declarations (headers not available, declared from backends/*.cpp)
+extern bool ImGui_ImplGlfw_InitForOpenGL(GLFWwindow* window, bool install_callbacks);
+extern void ImGui_ImplGlfw_Shutdown();
+extern void ImGui_ImplGlfw_NewFrame();
+extern bool ImGui_ImplOpenGL3_Init(const char* glsl_version = nullptr);
+extern void ImGui_ImplOpenGL3_Shutdown();
+extern void ImGui_ImplOpenGL3_NewFrame();
+extern void ImGui_ImplOpenGL3_RenderDrawData(ImDrawData* draw_data);
 
 void OpenGLRenderer::Register()
 {
@@ -72,9 +85,28 @@ bool OpenGLRenderer::Init(int width, int height, const std::string& appName)
     glEnable(GL_DEPTH_TEST);
     glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
 
-    glGenVertexArrays(1, &m_VAO);
+    float vertices[] = {
+        -0.5f, -0.5f, 0.0f,
+         0.5f, -0.5f, 0.0f,
+         0.0f,  0.5f, 0.0f
+    };
 
-    // Debug info
+    glGenVertexArrays(1, &m_VAO);
+    glGenBuffers(1, &m_VBO);
+
+    glBindVertexArray(m_VAO);
+    glBindBuffer(GL_ARRAY_BUFFER, m_VBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glBindVertexArray(0);
+
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGui::StyleColorsDark();
+    ImGui_ImplGlfw_InitForOpenGL(static_cast<GLFWwindow*>(window), true);
+    ImGui_ImplOpenGL3_Init("#version 450");
+
     std::cout << "OpenGL Version: " << glGetString(GL_VERSION) << std::endl;
     std::cout << "Renderer: " << glGetString(GL_RENDERER) << std::endl;
 
@@ -84,31 +116,38 @@ bool OpenGLRenderer::Init(int width, int height, const std::string& appName)
 
 void OpenGLRenderer::Shutdown()
 {
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+    glDeleteVertexArrays(1, &m_VAO);
+    glDeleteBuffers(1, &m_VBO);
     glfwTerminate();
 }
 
 void OpenGLRenderer::BeginFrame()
 {
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
     glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
 void OpenGLRenderer::Render()
 {
-    auto shader = ResourceManager::LoadShader("basic");
-    if (!shader) return;
-
-    shader->Bind();
-
-    glBindVertexArray(m_VAO);
-    glDrawArrays(GL_TRIANGLES, 0, 3);
+    Scene* activeScene = SceneManager::Instance().GetActiveScene();
+    if (activeScene) {
+        Frustum frustum;
+        TNode* root = activeScene->GetRoot();
+        if (root) {
+            activeScene->Draw(frustum);
+        }
+    }
 }
 void OpenGLRenderer::EndFrame()
 {
+    ImGui::Render();
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
     glfwSwapBuffers(static_cast<GLFWwindow*>(window));
-}
-void OpenGLRenderer::ImGuiNewFrame()
-{
-    // Future ImGui integration
 }
 
 void* OpenGLRenderer::GetWindow() const

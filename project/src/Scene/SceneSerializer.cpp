@@ -1,0 +1,257 @@
+#include "Scene/SceneSerializer.h"
+#include "Scene/Scene.h"
+#include "Scene/TNode.h"
+#include "Scene/SimpleEntities.h"
+#include "Core/Log.h"
+#include <fstream>
+
+json SceneSerializer::SerializeTransform(const Transform& transform) {
+    json j;
+    j["position"] = {transform.position.x, transform.position.y, transform.position.z};
+    j["rotation"] = {transform.rotation.x, transform.rotation.y, transform.rotation.z};
+    j["scale"] = {transform.scale.x, transform.scale.y, transform.scale.z};
+    return j;
+}
+
+Transform SceneSerializer::DeserializeTransform(const json& j) {
+    Transform t;
+    if (j.contains("position") && j["position"].is_array()) {
+        auto pos = j["position"];
+        t.position = {pos[0], pos[1], pos[2]};
+    }
+    if (j.contains("rotation") && j["rotation"].is_array()) {
+        auto rot = j["rotation"];
+        t.rotation = {rot[0], rot[1], rot[2]};
+    }
+    if (j.contains("scale") && j["scale"].is_array()) {
+        auto scl = j["scale"];
+        t.scale = {scl[0], scl[1], scl[2]};
+    }
+    return t;
+}
+
+json SceneSerializer::SerializeBoundingVolume(const BoundingVolume* boundingBox) {
+    if (!boundingBox) {
+        return json::object();
+    }
+
+    // Try to cast to known types
+    if (const Sphere* sphere = dynamic_cast<const Sphere*>(boundingBox)) {
+        json j;
+        j["type"] = "sphere";
+        j["center"] = {sphere->center.x, sphere->center.y, sphere->center.z};
+        j["radius"] = sphere->radius;
+        return j;
+    }
+
+    if (const AABB* aabb = dynamic_cast<const AABB*>(boundingBox)) {
+        json j;
+        j["type"] = "aabb";
+        j["center"] = {aabb->center.x, aabb->center.y, aabb->center.z};
+        j["extents"] = {aabb->extents.x, aabb->extents.y, aabb->extents.z};
+        return j;
+    }
+
+    return json::object();
+}
+
+BoundingVolume* SceneSerializer::DeserializeBoundingVolume(const json& j) {
+    if (j.is_null() || j.empty()) {
+        return nullptr;
+    }
+
+    if (!j.contains("type")) {
+        return nullptr;
+    }
+
+    std::string type = j["type"];
+
+    if (type == "sphere" && j.contains("center") && j.contains("radius")) {
+        auto center_arr = j["center"];
+        glm::vec3 center = {center_arr[0], center_arr[1], center_arr[2]};
+        float radius = j["radius"];
+        return new Sphere(center, radius);
+    }
+
+    if (type == "aabb" && j.contains("center") && j.contains("extents")) {
+        auto center_arr = j["center"];
+        auto extents_arr = j["extents"];
+        glm::vec3 center = {center_arr[0], center_arr[1], center_arr[2]};
+        glm::vec3 extents = {extents_arr[0], extents_arr[1], extents_arr[2]};
+        glm::vec3 min = center - extents;
+        glm::vec3 max = center + extents;
+        return new AABB(min, max);
+    }
+
+    return nullptr;
+}
+
+json SceneSerializer::SerializeEntity(const TEntity* entity) {
+    if (!entity) {
+        return json::object();
+    }
+
+    // Check entity type
+    if (dynamic_cast<const TriangleEntity*>(entity)) {
+        json j;
+        j["type"] = "triangle";
+        return j;
+    }
+
+    if (dynamic_cast<const SquareEntity*>(entity)) {
+        json j;
+        j["type"] = "square";
+        return j;
+    }
+
+    return json::object();
+}
+
+TEntity* SceneSerializer::DeserializeEntity(const json& j) {
+    if (j.is_null() || j.empty() || !j.contains("type")) {
+        return nullptr;
+    }
+
+    std::string type = j["type"];
+
+    if (type == "triangle") {
+        return new TriangleEntity();
+    }
+
+    if (type == "square") {
+        return new SquareEntity();
+    }
+
+    return nullptr;
+}
+
+json SceneSerializer::SerializeNode(const TNode* node) {
+    json j;
+
+    // Serialize name
+    if (!node->name.empty()) {
+        j["name"] = node->name;
+    }
+
+    // Serialize transform
+    j["transform"] = SerializeTransform(node->transform);
+
+    // Serialize entity
+    if (node->entity) {
+        j["entity"] = SerializeEntity(node->entity);
+    }
+
+    // Serialize bounding volume
+    if (node->boundingBox) {
+        j["boundingBox"] = SerializeBoundingVolume(node->boundingBox);
+    }
+
+    // Serialize children
+    if (!node->children.empty()) {
+        json children_array = json::array();
+        for (const TNode* child : node->children) {
+            children_array.push_back(SerializeNode(child));
+        }
+        j["children"] = children_array;
+    }
+
+    return j;
+}
+
+TNode* SceneSerializer::DeserializeNode(const json& j) {
+    TEntity* entity = nullptr;
+    if (j.contains("entity") && !j["entity"].empty()) {
+        entity = DeserializeEntity(j["entity"]);
+    }
+
+    BoundingVolume* boundingBox = nullptr;
+    if (j.contains("boundingBox") && !j["boundingBox"].empty()) {
+        boundingBox = DeserializeBoundingVolume(j["boundingBox"]);
+    }
+
+    std::string nodeName;
+    if (j.contains("name")) {
+        nodeName = j["name"];
+    }
+
+    TNode* node = new TNode(entity, boundingBox, nodeName);
+
+    // Deserialize transform
+    if (j.contains("transform")) {
+        node->transform = DeserializeTransform(j["transform"]);
+    }
+
+    // Deserialize children
+    if (j.contains("children") && j["children"].is_array()) {
+        for (const auto& child_j : j["children"]) {
+            TNode* child = DeserializeNode(child_j);
+            if (child) {
+                node->addChild(child);
+            }
+        }
+    }
+
+    return node;
+}
+
+bool SceneSerializer::SaveScene(Scene* scene, const std::string& filePath) {
+    if (!scene) {
+        Log::Error("Cannot save null scene");
+        return false;
+    }
+
+    try {
+        json j;
+        j["version"] = 1;
+
+        TNode* root = scene->GetRoot();
+        if (root) {
+            j["root"] = SerializeNode(root);
+        }
+
+        std::ofstream file(filePath);
+        if (!file.is_open()) {
+            Log::Error("Failed to open file for writing: " + filePath);
+            return false;
+        }
+
+        file << j.dump(2);
+        file.close();
+
+        Log::Info("Scene saved to: " + filePath);
+        return true;
+    } catch (const std::exception& e) {
+        Log::Error(std::string("Error saving scene: ") + e.what());
+        return false;
+    }
+}
+
+Scene* SceneSerializer::LoadScene(const std::string& filePath) {
+    try {
+        std::ifstream file(filePath);
+        if (!file.is_open()) {
+            Log::Error("Failed to open file for reading: " + filePath);
+            return nullptr;
+        }
+
+        json j;
+        file >> j;
+        file.close();
+
+        Scene* scene = new Scene();
+        scene->Init();
+
+        if (j.contains("root")) {
+            TNode* root = DeserializeNode(j["root"]);
+            if (root) {
+                scene->GetRoot()->addChild(root);
+            }
+        }
+
+        Log::Info("Scene loaded from: " + filePath);
+        return scene;
+    } catch (const std::exception& e) {
+        Log::Error(std::string("Error loading scene: ") + e.what());
+        return nullptr;
+    }
+}

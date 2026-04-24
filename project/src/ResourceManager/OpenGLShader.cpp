@@ -2,6 +2,7 @@
 #include "Core/Log.h"
 
 #include <glm/glm.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
 OpenGLShader::OpenGLShader(const std::string& name,
                            const std::string& vertexSource,
@@ -101,4 +102,35 @@ void OpenGLShader::CheckErrors(unsigned int object,
                        std::string(infoLog));
         }
     }
+}
+
+//=
+// Uniform setters
+//=
+void OpenGLShader::SetBool(const std::string& name, bool value) const {
+    glUniform1i(glGetUniformLocation(m_ID, name.c_str()), (int)value);
+}
+
+void OpenGLShader::SetInt(const std::string& name, int value) const {
+    glUniform1i(glGetUniformLocation(m_ID, name.c_str()), value);
+}
+
+void OpenGLShader::SetFloat(const std::string& name, float value) const {
+    glUniform1f(glGetUniformLocation(m_ID, name.c_str()), value);
+}
+
+void OpenGLShader::SetVec2(const std::string& name, const glm::vec2& value) const {
+    glUniform2fv(glGetUniformLocation(m_ID, name.c_str()), 1, glm::value_ptr(value));
+}
+
+void OpenGLShader::SetVec3(const std::string& name, const glm::vec3& value) const {
+    glUniform3fv(glGetUniformLocation(m_ID, name.c_str()), 1, glm::value_ptr(value));
+}
+
+void OpenGLShader::SetVec4(const std::string& name, const glm::vec4& value) const {
+    glUniform4fv(glGetUniformLocation(m_ID, name.c_str()), 1, glm::value_ptr(value));
+}
+
+void OpenGLShader::SetMat4(const std::string& name, const glm::mat4& value) const {
+    glUniformMatrix4fv(glGetUniformLocation(m_ID, name.c_str()), 1, GL_FALSE, glm::value_ptr(value));
 }

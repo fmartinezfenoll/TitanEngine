@@ -3,6 +3,7 @@
 #include "Core/Config.h"
 
 class IRenderer;
+class SceneManager;
 
 class Application
 {
@@ -12,8 +13,14 @@ public:
 
     bool Init();
     void Run();
-    void Update(float deltaTime);
+    virtual void Update(float deltaTime);
+    void OnImGui();
     void Shutdown();
+
+    SceneManager& GetSceneManager();
+
+protected:
+    virtual void SetupScenes();
 
 private:
     AppConfig m_config;

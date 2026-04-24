@@ -28,7 +28,9 @@ ENGINE_SRC := $(wildcard src/*.cpp src/*/*.cpp)
 ENGINE_OBJ := $(ENGINE_SRC:src/%.cpp=$(BUILD_DIR)/%.o)
 
 GLAD_SRC := thirdparty/glad/glad.c
-IMGUI_SRC := $(wildcard thirdparty/imgui/*.cpp)
+IMGUI_SRC := $(wildcard thirdparty/imgui/*.cpp) \
+             thirdparty/imgui/backends/imgui_impl_glfw.cpp \
+             thirdparty/imgui/backends/imgui_impl_opengl3.cpp
 
 GLAD_OBJ := $(BUILD_DIR)/thirdparty/glad.o
 IMGUI_OBJ := $(IMGUI_SRC:thirdparty/%.cpp=$(BUILD_DIR)/thirdparty/%.o)
@@ -43,7 +45,10 @@ THIRDPARTY_LIB := $(BUILD_DIR)/libthirdparty.a
 INCLUDE := -Iinclude \
            -Iexternal \
            -Ithirdparty \
-           -Ithirdparty/glfw/include
+           -Ithirdparty/imgui \
+           -Ithirdparty/imgui/backends \
+           -Ithirdparty/glfw/include \
+           -Ithirdparty/glm
 
 
 CXXFLAGS := -std=c++20 -Wall -Wextra -MMD -MP \

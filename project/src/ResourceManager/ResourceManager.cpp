@@ -72,6 +72,13 @@ ResourceManager::GetShader(const std::string& name)
 }
 
 //=
+const std::unordered_map<std::string, std::shared_ptr<OpenGLShader>>&
+ResourceManager::GetAllShaders()
+{
+    return m_Shaders;
+}
+
+//=
 void ResourceManager::Clear()
 {
     m_Shaders.clear();

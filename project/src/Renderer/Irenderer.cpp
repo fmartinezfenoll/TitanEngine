@@ -1,6 +1,6 @@
 #include "Renderer/IRenderer.h"
 
-void IRenderer::SetEntitiesReference(std::vector<TNodo*>* entitiesRef)
+void IRenderer::SetEntitiesReference(std::vector<TNode*>* entitiesRef)
 {
     entities = entitiesRef;
 }

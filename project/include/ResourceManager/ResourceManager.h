@@ -19,6 +19,9 @@ public:
     static std::shared_ptr<OpenGLShader>
     GetShader(const std::string& name);
 
+    static const std::unordered_map<std::string, std::shared_ptr<OpenGLShader>>&
+    GetAllShaders();
+
     static void Clear();
 
 private:

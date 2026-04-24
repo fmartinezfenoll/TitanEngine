@@ -4,6 +4,13 @@
 #include "Renderer/IRenderer.h"
 #include <iostream>
 #include "ResourceManager/ResourceManager.h"
+#include "Scene/SceneManager.h"
+#include "Scene/Scene.h"
+#include "Scene/SimpleEntities.h"
+#include "Scene/SceneSerializer.h"
+#include "Debug/DebugUI.h"
+#include <glm/glm.hpp>
+#include <filesystem>
 
 // ==============================
 // Basic functions
@@ -46,6 +53,10 @@ bool Application::Init()
         return false;
     }
 
+    SetupScenes();
+
+    DebugUI::Init();
+
     return true;
 }
 
@@ -65,17 +76,54 @@ void Application::Run()
 
         m_renderer->BeginFrame();
         m_renderer->Render();
+        OnImGui();
         m_renderer->EndFrame();
     }
 }
 void Application::Update(float deltaTime)
 {
-    
 }
 
+SceneManager& Application::GetSceneManager()
+{
+    return SceneManager::Instance();
+}
+
+void Application::OnImGui()
+{
+    DebugUI::DrawFrame(&SceneManager::Instance());
+}
+
+void Application::SetupScenes()
+{
+    SceneManager& sm = SceneManager::Instance();
+
+    std::filesystem::path scenesDir("scenes");
+    if (std::filesystem::exists(scenesDir) && !std::filesystem::is_empty(scenesDir)) {
+        sm.LoadAllScenesFromDirectory("scenes");
+    } else {
+        std::filesystem::create_directories("scenes");
+
+        Scene* triangleScene = sm.CreateScene("Triangle Scene");
+        TNode* triangleNode = new TNode(new TriangleEntity(), nullptr, "Triangle");
+        triangleNode->transform.position = glm::vec3(0.0f, 0.0f, 0.0f);
+        triangleScene->AddNodeToRoot(triangleNode);
+        SceneSerializer::SaveScene(triangleScene, "scenes/Triangle Scene.scene");
+
+        Scene* squareScene = sm.CreateScene("Square Scene");
+        TNode* squareNode = new TNode(new SquareEntity(), nullptr, "Square");
+        squareNode->transform.position = glm::vec3(0.0f, 0.0f, 0.0f);
+        squareScene->AddNodeToRoot(squareNode);
+        SceneSerializer::SaveScene(squareScene, "scenes/Square Scene.scene");
+
+        sm.LoadScene("Triangle Scene");
+    }
+}
 
 void Application::Shutdown()
 {
+    DebugUI::Shutdown();
+    SceneManager::Instance().UnloadAllScenes();
     if (m_renderer)
         m_renderer->Shutdown();
 }
