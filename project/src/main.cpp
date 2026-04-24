@@ -6,7 +6,6 @@ int main()
 
     if (!app.Init())
         return -1;
-
     app.Run();
     return 0;
 }

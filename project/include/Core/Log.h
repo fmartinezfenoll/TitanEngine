@@ -1,4 +1,9 @@
 #pragma once
+
+//=
+// Simple logging system
+//=
+
 #include <iostream>
 #include <string>
 
@@ -32,14 +37,12 @@ public:
 
 #else
 
-    // In Release, ignore Info & Warning
     static void SetLevel(Level) {}
     static void Info(const std::string&) {}
     static void Warning(const std::string&) {}
 
 #endif
 
-    // Error always active
     static void Error(const std::string& msg)
     {
         std::cout << "[ERROR] " << msg << std::endl;
@@ -48,6 +51,7 @@ public:
 private:
 
 #ifndef NDEBUG
+
     static void Message(Level lvl,
                         const char* prefix,
                         const std::string& msg)
@@ -59,5 +63,6 @@ private:
     }
 
     static Level currentLevel;
+
 #endif
 };

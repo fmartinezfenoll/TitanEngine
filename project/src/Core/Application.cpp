@@ -3,6 +3,7 @@
 #include "Renderer/RendererFactory.h"
 #include "Renderer/IRenderer.h"
 #include <iostream>
+#include "ResourceManager/ResourceManager.h"
 
 // ==============================
 // Basic functions
@@ -58,8 +59,13 @@ void Application::Run()
         float deltaTime = static_cast<float>(currentTime - lastTime);
         lastTime = currentTime;
 
+        m_renderer->PollEvents();
+
         Update(deltaTime);
+
+        m_renderer->BeginFrame();
         m_renderer->Render();
+        m_renderer->EndFrame();
     }
 }
 void Application::Update(float deltaTime)

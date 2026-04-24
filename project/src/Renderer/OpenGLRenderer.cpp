@@ -1,5 +1,7 @@
 #include "Renderer/OpenGLRenderer.h"
 #include "Renderer/RendererFactory.h"
+#include "ResourceManager/ResourceManager.h"
+#include "ResourceManager/OpenGLShader.h"
 
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
@@ -70,6 +72,8 @@ bool OpenGLRenderer::Init(int width, int height, const std::string& appName)
     glEnable(GL_DEPTH_TEST);
     glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
 
+    glGenVertexArrays(1, &m_VAO);
+
     // Debug info
     std::cout << "OpenGL Version: " << glGetString(GL_VERSION) << std::endl;
     std::cout << "Renderer: " << glGetString(GL_RENDERER) << std::endl;
@@ -83,16 +87,25 @@ void OpenGLRenderer::Shutdown()
     glfwTerminate();
 }
 
+void OpenGLRenderer::BeginFrame()
+{
+    glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+}
 void OpenGLRenderer::Render()
 {
-    GLFWwindow* glfwWindow = static_cast<GLFWwindow*>(window);
+    auto shader = ResourceManager::LoadShader("basic");
+    if (!shader) return;
 
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    shader->Bind();
 
-    glfwSwapBuffers(glfwWindow);
-    glfwPollEvents();
+    glBindVertexArray(m_VAO);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
 }
-
+void OpenGLRenderer::EndFrame()
+{
+    glfwSwapBuffers(static_cast<GLFWwindow*>(window));
+}
 void OpenGLRenderer::ImGuiNewFrame()
 {
     // Future ImGui integration
@@ -101,6 +114,10 @@ void OpenGLRenderer::ImGuiNewFrame()
 void* OpenGLRenderer::GetWindow() const
 {
     return window;
+}
+void OpenGLRenderer::PollEvents()
+{
+    glfwPollEvents();
 }
 bool OpenGLRenderer::ShouldClose() const
 {
