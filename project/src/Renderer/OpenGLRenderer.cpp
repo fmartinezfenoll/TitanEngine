@@ -1,10 +1,12 @@
 #include "Renderer/OpenGLRenderer.h"
 #include "Renderer/RendererFactory.h"
+#include "Renderer/Viewport.h"
 #include "ResourceManager/ResourceManager.h"
 #include "ResourceManager/OpenGLShader.h"
 #include "Scene/SceneManager.h"
 #include "Scene/Scene.h"
 #include "Scene/TNode.h"
+#include "Scene/CameraEntity.h"
 
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
@@ -71,6 +73,7 @@ bool OpenGLRenderer::Init(int width, int height, const std::string& appName)
 
     // Configure viewport
     glViewport(0, 0, width, height);
+    Viewport::Set(width, height);
 
     // Resize callback
     glfwSetFramebufferSizeCallback(
@@ -78,6 +81,7 @@ bool OpenGLRenderer::Init(int width, int height, const std::string& appName)
         [](GLFWwindow*, int w, int h)
         {
             glViewport(0, 0, w, h);
+            Viewport::Set(w, h);
         }
     );
 
@@ -122,6 +126,59 @@ void OpenGLRenderer::Shutdown()
     glDeleteVertexArrays(1, &m_VAO);
     glDeleteBuffers(1, &m_VBO);
     glfwTerminate();
+}
+
+void OpenGLRenderer::Update(float deltaTime)
+{
+    UpdateCameraInput(deltaTime);
+}
+
+void OpenGLRenderer::UpdateCameraInput(float deltaTime)
+{
+    Scene* activeScene = SceneManager::Instance().GetActiveScene();
+    if (!activeScene || !activeScene->GetMainCamera()) return;
+
+    TNode* cameraNode = activeScene->GetMainCamera();
+    auto* camera = dynamic_cast<CameraEntity*>(cameraNode->entity);
+    if (!camera) return;
+
+    GLFWwindow* win = static_cast<GLFWwindow*>(window);
+
+    glm::vec3 moveDir(0.0f);
+    if (glfwGetKey(win, GLFW_KEY_W) == GLFW_PRESS) moveDir.z += 1.0f;
+    if (glfwGetKey(win, GLFW_KEY_S) == GLFW_PRESS) moveDir.z -= 1.0f;
+    if (glfwGetKey(win, GLFW_KEY_D) == GLFW_PRESS) moveDir.x += 1.0f;
+    if (glfwGetKey(win, GLFW_KEY_A) == GLFW_PRESS) moveDir.x -= 1.0f;
+    if (glfwGetKey(win, GLFW_KEY_SPACE) == GLFW_PRESS) moveDir.y += 1.0f;
+    if (glfwGetKey(win, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS) moveDir.y -= 1.0f;
+    camera->ProcessKeyboard(moveDir, deltaTime);
+
+    if (glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS)
+    {
+        glfwSetInputMode(win, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+
+        double mouseX, mouseY;
+        glfwGetCursorPos(win, &mouseX, &mouseY);
+
+        if (m_firstMouse)
+        {
+            m_lastMouseX = mouseX;
+            m_lastMouseY = mouseY;
+            m_firstMouse = false;
+        }
+
+        float xOffset = static_cast<float>(mouseX - m_lastMouseX);
+        float yOffset = static_cast<float>(m_lastMouseY - mouseY);
+        m_lastMouseX = mouseX;
+        m_lastMouseY = mouseY;
+
+        camera->ProcessMouseLook(xOffset, yOffset);
+    }
+    else
+    {
+        glfwSetInputMode(win, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+        m_firstMouse = true;
+    }
 }
 
 void OpenGLRenderer::BeginFrame()

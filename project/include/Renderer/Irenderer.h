@@ -18,6 +18,7 @@ public:
     virtual bool ShouldClose() const { return false; }
 
     virtual void PollEvents() = 0;
+    virtual void Update(float deltaTime) {}
     virtual void BeginFrame() = 0;
     virtual void Render() = 0;
     virtual void EndFrame() = 0;

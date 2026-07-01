@@ -8,6 +8,8 @@
 #include "Scene/Scene.h"
 #include "Scene/SimpleEntities.h"
 #include "Scene/SceneSerializer.h"
+#include "Scene/CameraEntity.h"
+#include "Scene/GLTFLoader.h"
 #include "Debug/DebugUI.h"
 #include <glm/glm.hpp>
 #include <filesystem>
@@ -71,6 +73,7 @@ void Application::Run()
         lastTime = currentTime;
 
         m_renderer->PollEvents();
+        m_renderer->Update(deltaTime);
 
         Update(deltaTime);
 
@@ -117,6 +120,23 @@ void Application::SetupScenes()
         SceneSerializer::SaveScene(squareScene, "scenes/Square Scene.scene");
 
         sm.LoadScene("Triangle Scene");
+    }
+
+    if (!sm.GetScene("GLTF Scene")) {
+        Scene* gltfScene = sm.CreateScene("GLTF Scene");
+        for (TNode* node : GLTFLoader::LoadModel("resources/models/Box.glb")) {
+            gltfScene->AddNodeToRoot(node);
+        }
+    }
+    sm.LoadScene("GLTF Scene");
+
+    for (const auto& [name, scene] : sm.GetAllScenes()) {
+        if (!scene->GetMainCamera()) {
+            TNode* cameraNode = new TNode(nullptr, nullptr, "MainCamera");
+            cameraNode->transform.position = glm::vec3(0.0f, 0.0f, 3.0f);
+            cameraNode->entity = new CameraEntity(cameraNode);
+            scene->AddNodeToRoot(cameraNode);
+        }
     }
 }
 

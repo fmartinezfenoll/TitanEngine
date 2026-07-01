@@ -13,6 +13,7 @@ public:
 
     bool Init(int width, int height, const std::string& appName) override;
     void Shutdown() override;
+    void Update(float deltaTime) override;
     void BeginFrame();
     void Render() override;
 
@@ -28,4 +29,10 @@ private:
     void* window = nullptr; // Stored as void* to avoid exposing GLFW in header
     unsigned int m_VAO = 0;
     unsigned int m_VBO = 0;
+
+    bool m_firstMouse = true;
+    double m_lastMouseX = 0.0;
+    double m_lastMouseY = 0.0;
+
+    void UpdateCameraInput(float deltaTime);
 };

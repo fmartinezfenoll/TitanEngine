@@ -1,5 +1,7 @@
 #include "ResourceManager/ResourceManager.h"
 #include "ResourceManager/OpenGLShader.h"
+#include "ResourceManager/Texture.h"
+#include "ResourceManager/Material.h"
 #include "Core/Log.h"
 
 #include <fstream>
@@ -9,6 +11,16 @@ std::unordered_map<
     std::string,
     std::shared_ptr<OpenGLShader>>
     ResourceManager::m_Shaders;
+
+std::unordered_map<
+    std::string,
+    std::shared_ptr<Texture>>
+    ResourceManager::m_Textures;
+
+std::unordered_map<
+    std::string,
+    std::shared_ptr<Material>>
+    ResourceManager::m_Materials;
 
 //=
 std::string ResourceManager::ReadFile(const std::string& path)
@@ -79,8 +91,65 @@ ResourceManager::GetAllShaders()
 }
 
 //=
+// Texture API
+//=
+std::shared_ptr<Texture>
+ResourceManager::LoadTexture(const std::string& name, const std::string& filePath)
+{
+    auto it = m_Textures.find(name);
+    if (it != m_Textures.end())
+        return it->second;
+
+    auto texture = std::make_shared<Texture>(name, filePath);
+    if (!texture->IsValid())
+        return nullptr;
+
+    m_Textures[name] = texture;
+    return texture;
+}
+
+std::shared_ptr<Texture>
+ResourceManager::LoadTextureFromMemory(const std::string& name, const unsigned char* data, int size)
+{
+    auto it = m_Textures.find(name);
+    if (it != m_Textures.end())
+        return it->second;
+
+    auto texture = std::make_shared<Texture>(name, data, size);
+    if (!texture->IsValid())
+        return nullptr;
+
+    m_Textures[name] = texture;
+    return texture;
+}
+
+std::shared_ptr<Texture>
+ResourceManager::GetTexture(const std::string& name)
+{
+    auto it = m_Textures.find(name);
+    return it == m_Textures.end() ? nullptr : it->second;
+}
+
+//=
+// Material API
+//=
+std::shared_ptr<Material>
+ResourceManager::GetMaterial(const std::string& name)
+{
+    auto it = m_Materials.find(name);
+    return it == m_Materials.end() ? nullptr : it->second;
+}
+
+void ResourceManager::AddMaterial(const std::string& name, const std::shared_ptr<Material>& material)
+{
+    m_Materials[name] = material;
+}
+
+//=
 void ResourceManager::Clear()
 {
     m_Shaders.clear();
-    Log::Info("All shaders cleared");
+    m_Textures.clear();
+    m_Materials.clear();
+    Log::Info("All resources cleared");
 }

@@ -31,11 +31,14 @@ GLAD_SRC := thirdparty/glad/glad.c
 IMGUI_SRC := $(wildcard thirdparty/imgui/*.cpp) \
              thirdparty/imgui/backends/imgui_impl_glfw.cpp \
              thirdparty/imgui/backends/imgui_impl_opengl3.cpp
+VENDOR_SRC := thirdparty/stb/stb_image_impl.cpp \
+              thirdparty/tinygltf/tiny_gltf_impl.cpp
 
 GLAD_OBJ := $(BUILD_DIR)/thirdparty/glad.o
 IMGUI_OBJ := $(IMGUI_SRC:thirdparty/%.cpp=$(BUILD_DIR)/thirdparty/%.o)
+VENDOR_OBJ := $(VENDOR_SRC:thirdparty/%.cpp=$(BUILD_DIR)/thirdparty/%.o)
 
-THIRDPARTY_OBJ := $(GLAD_OBJ) $(IMGUI_OBJ)
+THIRDPARTY_OBJ := $(GLAD_OBJ) $(IMGUI_OBJ) $(VENDOR_OBJ)
 THIRDPARTY_LIB := $(BUILD_DIR)/libthirdparty.a
 
 # ==============================
@@ -48,7 +51,9 @@ INCLUDE := -Iinclude \
            -Ithirdparty/imgui \
            -Ithirdparty/imgui/backends \
            -Ithirdparty/glfw/include \
-           -Ithirdparty/glm
+           -Ithirdparty/glm \
+           -Ithirdparty/stb \
+           -Ithirdparty/tinygltf
 
 
 CXXFLAGS := -std=c++20 -Wall -Wextra -MMD -MP \

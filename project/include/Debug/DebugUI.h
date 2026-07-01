@@ -17,6 +17,7 @@ private:
     static void DrawSceneSelector(SceneManager* sceneManager);
     static void DrawInspector();
     static void DrawDeleteConfirmation();
+    static void DrawCameraTab(SceneManager* sceneManager);
 
     static TNode* m_selectedNode;
     static bool m_showDeleteConfirm;

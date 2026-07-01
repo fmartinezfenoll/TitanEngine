@@ -4,6 +4,7 @@
 #include "Scene/TNode.h"
 #include "Scene/SceneSerializer.h"
 #include "Scene/SimpleEntities.h"
+#include "Scene/CameraEntity.h"
 #include "ResourceManager/ResourceManager.h"
 #include <imgui.h>
 #include <glm/glm.hpp>
@@ -65,6 +66,15 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
                 ImGui::EndTabItem();
             }
 
+            // Tab 3: Camera
+            if (ImGui::BeginTabItem("Camera")) {
+                ImGui::BeginChild("CameraChild", ImVec2(0, 400), true);
+                DrawCameraTab(sceneManager);
+                ImGui::EndChild();
+
+                ImGui::EndTabItem();
+            }
+
             ImGui::EndTabBar();
         }
     }
@@ -95,6 +105,8 @@ void DebugUI::DrawSceneTree(TNode* node, int depth) {
             label = "Triangle";
         } else if (dynamic_cast<SquareEntity*>(node->entity)) {
             label = "Square";
+        } else if (dynamic_cast<CameraEntity*>(node->entity)) {
+            label = "Camera";
         } else {
             label = "Entity";
         }
@@ -215,6 +227,8 @@ void DebugUI::DrawInspector() {
                 entityType = "Triangle";
             } else if (dynamic_cast<SquareEntity*>(m_selectedNode->entity)) {
                 entityType = "Square";
+            } else if (dynamic_cast<CameraEntity*>(m_selectedNode->entity)) {
+                entityType = "Camera";
             }
             ImGui::BulletText("Type: %s", entityType.c_str());
         } else {
@@ -281,6 +295,74 @@ void DebugUI::DrawDeleteConfirmation() {
     if (!open) {
         m_showDeleteConfirm = false;
     }
+}
+
+void DebugUI::DrawCameraTab(SceneManager* sceneManager) {
+    if (!sceneManager) return;
+
+    Scene* activeScene = sceneManager->GetActiveScene();
+    if (!activeScene) {
+        ImGui::Text("No active scene.");
+        return;
+    }
+
+    const auto& cameras = activeScene->GetCameras();
+    if (cameras.empty()) {
+        ImGui::Text("No cameras in this scene.");
+        return;
+    }
+
+    TNode* mainCamera = activeScene->GetMainCamera();
+
+    ImGui::Text("Cameras: %zu", cameras.size());
+    ImGui::Separator();
+
+    if (ImGui::BeginCombo("Main Camera", mainCamera && !mainCamera->name.empty() ? mainCamera->name.c_str() : "Unnamed")) {
+        for (TNode* camNode : cameras) {
+            bool isSelected = (camNode == mainCamera);
+            std::string label = camNode->name.empty() ? "Unnamed" : camNode->name;
+            label += "##" + std::to_string(reinterpret_cast<uintptr_t>(camNode));
+            if (ImGui::Selectable(label.c_str(), isSelected)) {
+                activeScene->SetMainCamera(camNode);
+            }
+            if (isSelected) {
+                ImGui::SetItemDefaultFocus();
+            }
+        }
+        ImGui::EndCombo();
+    }
+
+    if (!mainCamera) return;
+
+    auto* camera = dynamic_cast<CameraEntity*>(mainCamera->entity);
+    if (!camera) {
+        ImGui::Text("Main camera node has no CameraEntity.");
+        return;
+    }
+
+    ImGui::Spacing();
+    ImGui::Text("Transform:");
+    ImGui::Separator();
+    ImGui::DragFloat3("Position##camera", &mainCamera->transform.position.x, 0.1f);
+    ImGui::DragFloat("Yaw##camera", &camera->yaw, 0.5f);
+    ImGui::DragFloat("Pitch##camera", &camera->pitch, 0.5f, -89.0f, 89.0f);
+
+    ImGui::Spacing();
+    ImGui::Text("Lens:");
+    ImGui::Separator();
+    ImGui::DragFloat("FOV##camera", &camera->fov, 0.5f, 1.0f, 170.0f);
+    ImGui::DragFloat("Near Plane##camera", &camera->nearPlane, 0.01f, 0.001f, camera->farPlane - 0.01f);
+    ImGui::DragFloat("Far Plane##camera", &camera->farPlane, 1.0f, camera->nearPlane + 0.01f, 10000.0f);
+
+    ImGui::Spacing();
+    ImGui::Text("Input:");
+    ImGui::Separator();
+    ImGui::DragFloat("Move Speed##camera", &camera->moveSpeed, 0.1f, 0.1f, 100.0f);
+    ImGui::DragFloat("Mouse Sensitivity##camera", &camera->mouseSensitivity, 0.01f, 0.01f, 5.0f);
+
+    ImGui::Spacing();
+    glm::vec3 forward = camera->GetForward();
+    ImGui::Text("Forward: (%.2f, %.2f, %.2f)", forward.x, forward.y, forward.z);
 }
 
 void DebugUI::DrawSceneSelector(SceneManager* sceneManager) {

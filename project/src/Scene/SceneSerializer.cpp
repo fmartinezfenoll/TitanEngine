@@ -3,9 +3,14 @@
 #include "Scene/TNode.h"
 #include "Scene/SimpleEntities.h"
 #include "Core/Log.h"
+#include <json.hpp>
 #include <fstream>
 
-json SceneSerializer::SerializeTransform(const Transform& transform) {
+using json = nlohmann::json;
+
+namespace {
+
+json SerializeTransform(const Transform& transform) {
     json j;
     j["position"] = {transform.position.x, transform.position.y, transform.position.z};
     j["rotation"] = {transform.rotation.x, transform.rotation.y, transform.rotation.z};
@@ -13,7 +18,7 @@ json SceneSerializer::SerializeTransform(const Transform& transform) {
     return j;
 }
 
-Transform SceneSerializer::DeserializeTransform(const json& j) {
+Transform DeserializeTransform(const json& j) {
     Transform t;
     if (j.contains("position") && j["position"].is_array()) {
         auto pos = j["position"];
@@ -30,7 +35,7 @@ Transform SceneSerializer::DeserializeTransform(const json& j) {
     return t;
 }
 
-json SceneSerializer::SerializeBoundingVolume(const BoundingVolume* boundingBox) {
+json SerializeBoundingVolume(const BoundingVolume* boundingBox) {
     if (!boundingBox) {
         return json::object();
     }
@@ -55,7 +60,7 @@ json SceneSerializer::SerializeBoundingVolume(const BoundingVolume* boundingBox)
     return json::object();
 }
 
-BoundingVolume* SceneSerializer::DeserializeBoundingVolume(const json& j) {
+BoundingVolume* DeserializeBoundingVolume(const json& j) {
     if (j.is_null() || j.empty()) {
         return nullptr;
     }
@@ -86,7 +91,7 @@ BoundingVolume* SceneSerializer::DeserializeBoundingVolume(const json& j) {
     return nullptr;
 }
 
-json SceneSerializer::SerializeEntity(const TEntity* entity) {
+json SerializeEntity(const TEntity* entity) {
     if (!entity) {
         return json::object();
     }
@@ -107,7 +112,7 @@ json SceneSerializer::SerializeEntity(const TEntity* entity) {
     return json::object();
 }
 
-TEntity* SceneSerializer::DeserializeEntity(const json& j) {
+TEntity* DeserializeEntity(const json& j) {
     if (j.is_null() || j.empty() || !j.contains("type")) {
         return nullptr;
     }
@@ -125,7 +130,7 @@ TEntity* SceneSerializer::DeserializeEntity(const json& j) {
     return nullptr;
 }
 
-json SceneSerializer::SerializeNode(const TNode* node) {
+json SerializeNode(const TNode* node) {
     json j;
 
     // Serialize name
@@ -158,7 +163,7 @@ json SceneSerializer::SerializeNode(const TNode* node) {
     return j;
 }
 
-TNode* SceneSerializer::DeserializeNode(const json& j) {
+TNode* DeserializeNode(const json& j) {
     TEntity* entity = nullptr;
     if (j.contains("entity") && !j["entity"].empty()) {
         entity = DeserializeEntity(j["entity"]);
@@ -193,6 +198,8 @@ TNode* SceneSerializer::DeserializeNode(const json& j) {
 
     return node;
 }
+
+} // namespace
 
 bool SceneSerializer::SaveScene(Scene* scene, const std::string& filePath) {
     if (!scene) {
