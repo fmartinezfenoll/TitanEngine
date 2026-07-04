@@ -1,14 +1,14 @@
-#include "Scene/CameraEntity.h"
+#include "Scene/CameraComponent.h"
 #include "Scene/TNode.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
 
-CameraEntity::CameraEntity(TNode* owner)
+CameraComponent::CameraComponent(TNode* owner)
     : m_owner(owner)
 {
 }
 
-glm::vec3 CameraEntity::GetForward() const
+glm::vec3 CameraComponent::GetForward() const
 {
     glm::vec3 forward;
     forward.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
@@ -17,23 +17,23 @@ glm::vec3 CameraEntity::GetForward() const
     return glm::normalize(forward);
 }
 
-glm::vec3 CameraEntity::GetRight() const
+glm::vec3 CameraComponent::GetRight() const
 {
     return glm::normalize(glm::cross(GetForward(), glm::vec3(0.0f, 1.0f, 0.0f)));
 }
 
-glm::mat4 CameraEntity::GetViewMatrix() const
+glm::mat4 CameraComponent::GetViewMatrix() const
 {
     glm::vec3 position = m_owner ? m_owner->transform.position : glm::vec3(0.0f);
     return glm::lookAt(position, position + GetForward(), glm::vec3(0.0f, 1.0f, 0.0f));
 }
 
-glm::mat4 CameraEntity::GetProjectionMatrix(float aspectRatio) const
+glm::mat4 CameraComponent::GetProjectionMatrix(float aspectRatio) const
 {
     return glm::perspective(glm::radians(fov), aspectRatio, nearPlane, farPlane);
 }
 
-void CameraEntity::ProcessKeyboard(const glm::vec3& moveDir, float deltaTime)
+void CameraComponent::ProcessKeyboard(const glm::vec3& moveDir, float deltaTime)
 {
     if (!m_owner) return;
 
@@ -48,7 +48,7 @@ void CameraEntity::ProcessKeyboard(const glm::vec3& moveDir, float deltaTime)
     m_owner->transform.position += delta * moveSpeed * deltaTime;
 }
 
-void CameraEntity::ProcessMouseLook(float xOffset, float yOffset)
+void CameraComponent::ProcessMouseLook(float xOffset, float yOffset)
 {
     yaw += xOffset * mouseSensitivity;
     pitch += yOffset * mouseSensitivity;

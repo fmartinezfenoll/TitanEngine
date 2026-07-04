@@ -6,7 +6,7 @@
 #include "Scene/SceneManager.h"
 #include "Scene/Scene.h"
 #include "Scene/TNode.h"
-#include "Scene/CameraEntity.h"
+#include "Scene/CameraComponent.h"
 
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
@@ -139,7 +139,7 @@ void OpenGLRenderer::UpdateCameraInput(float deltaTime)
     if (!activeScene || !activeScene->GetMainCamera()) return;
 
     TNode* cameraNode = activeScene->GetMainCamera();
-    auto* camera = dynamic_cast<CameraEntity*>(cameraNode->entity);
+    auto* camera = cameraNode->GetComponent<CameraComponent>();
     if (!camera) return;
 
     GLFWwindow* win = static_cast<GLFWwindow*>(window);

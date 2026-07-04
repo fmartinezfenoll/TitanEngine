@@ -3,16 +3,28 @@
 #include "Scene/Scene.h"
 #include "Scene/TNode.h"
 #include "Scene/SceneSerializer.h"
-#include "Scene/SimpleEntities.h"
-#include "Scene/CameraEntity.h"
+#include "Scene/CameraComponent.h"
+#include "Scene/MeshComponent.h"
+#include "Scene/MaterialComponent.h"
+#include "ResourceManager/Material.h"
+#include "ResourceManager/Texture.h"
+#include "ResourceManager/OpenGLShader.h"
 #include "ResourceManager/ResourceManager.h"
 #include <imgui.h>
 #include <glm/glm.hpp>
 #include <filesystem>
+#include <cstdio>
 
 TNode* DebugUI::m_selectedNode = nullptr;
 bool DebugUI::m_showDeleteConfirm = false;
 std::string DebugUI::m_sceneToDelete = "";
+
+TNode* DebugUI::m_nodeToDelete = nullptr;
+bool DebugUI::m_showNodeDeleteConfirm = false;
+
+TNode* DebugUI::m_renamingNode = nullptr;
+char DebugUI::m_renameBuffer[256] = "";
+bool DebugUI::m_renameJustStarted = false;
 
 void DebugUI::Init() {
     // ImGui context is already created by OpenGLRenderer
@@ -46,7 +58,7 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
                 TNode* root = activeScene->GetRoot();
                 if (root) {
                     for (TNode* child : root->children) {
-                        DrawSceneTree(child);
+                        DrawSceneTree(child, activeScene);
                     }
                 }
                 ImGui::EndChild();
@@ -80,12 +92,56 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
     }
     ImGui::End();
 
-    DrawInspector();
+    DrawInspector(activeScene);
     DrawDeleteConfirmation();
+    DrawNodeDeleteConfirmation();
 }
 
-void DebugUI::DrawSceneTree(TNode* node, int depth) {
+std::string DebugUI::DescribeNode(TNode* node) {
+    if (!node) return "";
+
+    if (node->components.empty()) {
+        return "Group";
+    }
+
+    std::string desc;
+    for (const auto& c : node->components) {
+        if (!desc.empty()) desc += ", ";
+
+        if (dynamic_cast<MeshComponent*>(c.get())) {
+            desc += "Mesh";
+        } else if (dynamic_cast<MaterialComponent*>(c.get())) {
+            desc += "Material";
+        } else if (dynamic_cast<CameraComponent*>(c.get())) {
+            desc += "Camera";
+        } else {
+            desc += "Component";
+        }
+    }
+    return desc;
+}
+
+void DebugUI::DrawSceneTree(TNode* node, Scene* activeScene, int depth) {
     if (!node) return;
+
+    std::string idSuffix = "##" + std::to_string(reinterpret_cast<uintptr_t>(node));
+
+    if (m_renamingNode == node) {
+        if (m_renameJustStarted) {
+            ImGui::SetKeyboardFocusHere();
+            m_renameJustStarted = false;
+        }
+        ImGui::SetNextItemWidth(200);
+        bool commit = ImGui::InputText(("##rename" + idSuffix).c_str(), m_renameBuffer,
+            sizeof(m_renameBuffer), ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+        if (commit) {
+            node->name = m_renameBuffer;
+            m_renamingNode = nullptr;
+        } else if (ImGui::IsItemDeactivated()) {
+            m_renamingNode = nullptr;
+        }
+        return;
+    }
 
     ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_OpenOnDoubleClick;
 
@@ -97,23 +153,9 @@ void DebugUI::DrawSceneTree(TNode* node, int depth) {
         flags |= ImGuiTreeNodeFlags_Selected;
     }
 
-    std::string label;
-    if (!node->name.empty()) {
-        label = node->name;
-    } else if (node->entity != nullptr) {
-        if (dynamic_cast<TriangleEntity*>(node->entity)) {
-            label = "Triangle";
-        } else if (dynamic_cast<SquareEntity*>(node->entity)) {
-            label = "Square";
-        } else if (dynamic_cast<CameraEntity*>(node->entity)) {
-            label = "Camera";
-        } else {
-            label = "Entity";
-        }
-    } else {
-        label = "Empty Node";
-    }
-    label += "##" + std::to_string(reinterpret_cast<uintptr_t>(node));
+    std::string label = node->name.empty() ? "Unnamed" : node->name;
+    label += "  [" + DescribeNode(node) + "]";
+    label += idSuffix;
 
     bool opened = ImGui::TreeNodeEx(label.c_str(), flags);
 
@@ -121,9 +163,33 @@ void DebugUI::DrawSceneTree(TNode* node, int depth) {
         m_selectedNode = node;
     }
 
+    if (ImGui::BeginPopupContextItem(("NodeContextMenu" + idSuffix).c_str())) {
+        m_selectedNode = node;
+
+        if (ImGui::MenuItem("Rename")) {
+            m_renamingNode = node;
+            m_renameJustStarted = true;
+            std::string current = node->name.empty() ? "Unnamed" : node->name;
+            std::snprintf(m_renameBuffer, sizeof(m_renameBuffer), "%s", current.c_str());
+        }
+
+        if (ImGui::MenuItem("Delete")) {
+            m_nodeToDelete = node;
+            m_showNodeDeleteConfirm = true;
+        }
+
+        ImGui::EndPopup();
+    }
+
+    if (m_selectedNode == node && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)
+        && ImGui::IsKeyPressed(ImGuiKey_Delete)) {
+        m_nodeToDelete = node;
+        m_showNodeDeleteConfirm = true;
+    }
+
     if (opened) {
         for (TNode* child : node->children) {
-            DrawSceneTree(child, depth + 1);
+            DrawSceneTree(child, activeScene, depth + 1);
         }
         ImGui::TreePop();
     }
@@ -167,7 +233,7 @@ void DebugUI::DrawResourcesTree() {
 void DebugUI::DrawNodeProperties(TNode* node) {
     if (!node) return;
 
-    ImGui::Text("Node Type: %s", node->entity ? "Entity" : "Group");
+    ImGui::Text("Node Type: %s", node->components.empty() ? "Group" : "Entity");
 
     ImGui::Spacing();
     ImGui::Text("Transform:");
@@ -201,7 +267,7 @@ void DebugUI::DrawNodeProperties(TNode* node) {
         node->getGlobalPosition().z);
 }
 
-void DebugUI::DrawInspector() {
+void DebugUI::DrawInspector(Scene* activeScene) {
     if (!m_selectedNode) return;
 
     ImGui::SetNextWindowPos(ImVec2(520, 10), ImGuiCond_FirstUseEver);
@@ -219,20 +285,71 @@ void DebugUI::DrawInspector() {
         ImGui::DragFloat3("Scale##inspector", &m_selectedNode->transform.scale.x, 0.1f);
 
         ImGui::Spacing();
-        ImGui::Text("Entity:");
+        ImGui::Text("Components: %zu", m_selectedNode->components.size());
         ImGui::Separator();
-        if (m_selectedNode->entity) {
-            std::string entityType = "Unknown";
-            if (dynamic_cast<TriangleEntity*>(m_selectedNode->entity)) {
-                entityType = "Triangle";
-            } else if (dynamic_cast<SquareEntity*>(m_selectedNode->entity)) {
-                entityType = "Square";
-            } else if (dynamic_cast<CameraEntity*>(m_selectedNode->entity)) {
-                entityType = "Camera";
+
+        if (m_selectedNode->components.empty()) {
+            ImGui::BulletText("No components (Group Node)");
+        }
+
+        if (auto* mesh = m_selectedNode->GetComponent<MeshComponent>()) {
+            ImGui::Text("Mesh:");
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Remove##mesh")) {
+                m_selectedNode->RemoveComponent<MeshComponent>();
+            } else {
+                ImGui::Indent();
+                ImGui::BulletText("Vertices: %zu", mesh->GetVertexCount());
+                ImGui::BulletText("Indices: %zu", mesh->GetIndexCount());
+                ImGui::BulletText("Triangles: %zu", mesh->GetIndexCount() / 3);
+                ImGui::Unindent();
             }
-            ImGui::BulletText("Type: %s", entityType.c_str());
-        } else {
-            ImGui::BulletText("No entity (Empty Node)");
+        }
+
+        if (auto* materialComp = m_selectedNode->GetComponent<MaterialComponent>()) {
+            ImGui::Spacing();
+            ImGui::Text("Material:");
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Remove##material")) {
+                m_selectedNode->RemoveComponent<MaterialComponent>();
+            } else {
+                ImGui::Indent();
+                if (const auto& mat = materialComp->material) {
+                    auto shader = mat->GetShader();
+                    ImGui::BulletText("Shader: %s", shader ? shader->GetName().c_str() : "None");
+                    ImGui::BulletText("Base Color: (%.2f, %.2f, %.2f, %.2f)",
+                        mat->baseColor.r, mat->baseColor.g, mat->baseColor.b, mat->baseColor.a);
+                    ImGui::BulletText("Albedo Texture: %s", mat->albedo ? "Yes" : "No");
+                    if (mat->albedo) {
+                        ImGui::Indent();
+                        ImGui::BulletText("%dx%d", mat->albedo->GetWidth(), mat->albedo->GetHeight());
+                        ImGui::Unindent();
+                    }
+                    ImGui::BulletText("Normal Texture: %s", mat->normal ? "Yes" : "No");
+                    ImGui::BulletText("MetallicRoughness Texture: %s", mat->metallicRoughness ? "Yes" : "No");
+                } else {
+                    ImGui::BulletText("No material resource");
+                }
+                ImGui::Unindent();
+            }
+        }
+
+        if (auto* camera = m_selectedNode->GetComponent<CameraComponent>()) {
+            ImGui::Spacing();
+            ImGui::Text("Camera:");
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Remove##camera")) {
+                if (activeScene) {
+                    activeScene->UnregisterCamera(m_selectedNode);
+                }
+                m_selectedNode->RemoveComponent<CameraComponent>();
+            } else {
+                ImGui::Indent();
+                ImGui::BulletText("FOV: %.1f", camera->fov);
+                ImGui::BulletText("Yaw/Pitch: %.1f / %.1f", camera->yaw, camera->pitch);
+                ImGui::BulletText("Near/Far: %.2f / %.2f", camera->nearPlane, camera->farPlane);
+                ImGui::Unindent();
+            }
         }
 
         ImGui::Spacing();
@@ -297,6 +414,78 @@ void DebugUI::DrawDeleteConfirmation() {
     }
 }
 
+void DebugUI::DeleteNode(TNode* node, Scene* activeScene) {
+    if (!node) return;
+
+    if (activeScene) {
+        // Unregister any cameras anywhere in this node's subtree before it's freed.
+        std::vector<TNode*> stack = { node };
+        while (!stack.empty()) {
+            TNode* current = stack.back();
+            stack.pop_back();
+            if (current->GetComponent<CameraComponent>()) {
+                activeScene->UnregisterCamera(current);
+            }
+            for (TNode* child : current->children) {
+                stack.push_back(child);
+            }
+        }
+    }
+
+    if (m_selectedNode == node) {
+        m_selectedNode = nullptr;
+    }
+    if (m_renamingNode == node) {
+        m_renamingNode = nullptr;
+    }
+
+    node->removeFromParent();
+    delete node;
+}
+
+void DebugUI::DrawNodeDeleteConfirmation() {
+    if (!m_showNodeDeleteConfirm || !m_nodeToDelete) return;
+
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(400, -1), ImGuiCond_FirstUseEver);
+
+    std::string nodeName = m_nodeToDelete->name.empty() ? "Unnamed" : m_nodeToDelete->name;
+
+    bool open = true;
+    if (ImGui::Begin("Delete Node?", &open, ImGuiWindowFlags_Modal | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextWrapped("Are you sure you want to delete:\n\n\"%s\"\n\nThis will also delete all of its children. This action cannot be undone.", nodeName.c_str());
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        float buttonWidth = 140.0f;
+        float spacing = ImGui::GetStyle().ItemSpacing.x;
+        float totalWidth = (buttonWidth * 2) + spacing;
+        ImGui::SetCursorPosX((ImGui::GetWindowSize().x - totalWidth) * 0.5f);
+
+        if (ImGui::Button("Delete Forever##node", ImVec2(buttonWidth, 0))) {
+            DeleteNode(m_nodeToDelete, SceneManager::Instance().GetActiveScene());
+            m_nodeToDelete = nullptr;
+            m_showNodeDeleteConfirm = false;
+        }
+
+        ImGui::SameLine();
+
+        if (ImGui::Button("Cancel##node", ImVec2(buttonWidth, 0))) {
+            m_nodeToDelete = nullptr;
+            m_showNodeDeleteConfirm = false;
+        }
+
+        ImGui::End();
+    }
+
+    if (!open) {
+        m_nodeToDelete = nullptr;
+        m_showNodeDeleteConfirm = false;
+    }
+}
+
 void DebugUI::DrawCameraTab(SceneManager* sceneManager) {
     if (!sceneManager) return;
 
@@ -334,9 +523,9 @@ void DebugUI::DrawCameraTab(SceneManager* sceneManager) {
 
     if (!mainCamera) return;
 
-    auto* camera = dynamic_cast<CameraEntity*>(mainCamera->entity);
+    auto* camera = mainCamera->GetComponent<CameraComponent>();
     if (!camera) {
-        ImGui::Text("Main camera node has no CameraEntity.");
+        ImGui::Text("Main camera node has no CameraComponent.");
         return;
     }
 

@@ -1,15 +1,12 @@
 #pragma once
-#include "Scene/TEntity.h"
+#include "Scene/Component.h"
 #include <glm/glm.hpp>
 
 class TNode;
 
-class CameraEntity : public TEntity {
+class CameraComponent : public Component {
 public:
-    explicit CameraEntity(TNode* owner);
-
-    void draw(const glm::mat4& modelMatrix) override {}
-    void update(float deltaTime) override {}
+    explicit CameraComponent(TNode* owner);
 
     glm::mat4 GetViewMatrix() const;
     glm::mat4 GetProjectionMatrix(float aspectRatio) const;

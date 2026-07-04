@@ -7,14 +7,16 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <memory>
-#include "Scene/TEntity.h"
+#include "Scene/Component.h"
 
 // Forward declarations
 struct BoundingVolume;
 struct Frustum;
+class MeshComponent;
+class MaterialComponent;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 📌 STRUCT PLANE
+//  STRUCT PLANE
 struct Plane {
     glm::vec3 normal = glm::vec3(0.0f, 1.0f, 0.0f);
     float distance = 0.0f;
@@ -133,24 +135,50 @@ struct Transform {
 // 📌 CLASS TNODE
 class TNode {
 public:
-    TEntity* entity;
+    std::vector<std::unique_ptr<Component>> components;
     std::vector<TNode*> children;
     TNode* parent = nullptr;
     Transform transform;
     BoundingVolume* boundingBox = nullptr;
     std::string name;
 
-    TNode(TEntity* entity = nullptr, BoundingVolume* boundingBox = nullptr, const std::string& nodeName = "")
-        : entity(entity), boundingBox(boundingBox), name(nodeName) {}
+    TNode(BoundingVolume* boundingBox = nullptr, const std::string& nodeName = "")
+        : boundingBox(boundingBox), name(nodeName) {}
 
     ~TNode() {
         for (auto child : children) delete child;
-        if (entity) delete entity;
         if (boundingBox) delete boundingBox;
     }
 
     TNode(const TNode&) = delete;
     TNode& operator=(const TNode&) = delete;
+
+    template<typename T>
+    T* GetComponent() const {
+        for (auto& c : components) {
+            if (auto* match = dynamic_cast<T*>(c.get())) return match;
+        }
+        return nullptr;
+    }
+
+    template<typename T, typename... Args>
+    T* AddComponent(Args&&... args) {
+        auto comp = std::make_unique<T>(std::forward<Args>(args)...);
+        T* ptr = comp.get();
+        components.push_back(std::move(comp));
+        return ptr;
+    }
+
+    template<typename T>
+    bool RemoveComponent() {
+        for (auto it = components.begin(); it != components.end(); ++it) {
+            if (dynamic_cast<T*>(it->get())) {
+                components.erase(it);
+                return true;
+            }
+        }
+        return false;
+    }
 
     void addChild(TNode* node) {
         if (node && node != this) {
@@ -174,21 +202,7 @@ public:
         }
     }
 
-    void draw(const Frustum& frustum, const glm::mat4& parentMatrix = glm::mat4(1.0f)) {
-        glm::mat4 modelMatrix = parentMatrix * transform.getModelMatrix();
-
-        if (!boundingBox || boundingBox->isOnFrustum(frustum, modelMatrix)) {
-            if (entity) {
-                entity->draw(modelMatrix);
-            }
-
-            for (TNode* child : children) {
-                if (child) {
-                    child->draw(frustum, modelMatrix);
-                }
-            }
-        }
-    }
+    void draw(const Frustum& frustum, const glm::mat4& parentMatrix = glm::mat4(1.0f));
 
     glm::mat4 getModelMatrix() const {
         if (parent) {

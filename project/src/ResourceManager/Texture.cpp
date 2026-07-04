@@ -7,7 +7,10 @@
 Texture::Texture(const std::string& name, const std::string& filePath)
     : Resource(name)
 {
-    stbi_set_flip_vertically_on_load(true);
+    // glTF UVs have V=0 at the top, matching stb_image's default row order
+    // (row 0 = top of the source image) against OpenGL's texture storage
+    // (row 0 = V=0), so textures are loaded unflipped.
+    stbi_set_flip_vertically_on_load(false);
     unsigned char* pixels = stbi_load(filePath.c_str(), &m_Width, &m_Height, &m_Channels, 4);
     if (!pixels)
     {
@@ -22,7 +25,7 @@ Texture::Texture(const std::string& name, const std::string& filePath)
 Texture::Texture(const std::string& name, const unsigned char* data, int size)
     : Resource(name)
 {
-    stbi_set_flip_vertically_on_load(true);
+    stbi_set_flip_vertically_on_load(false);
     unsigned char* pixels = stbi_load_from_memory(data, size, &m_Width, &m_Height, &m_Channels, 4);
     if (!pixels)
     {

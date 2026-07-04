@@ -4,15 +4,54 @@
 #include "Renderer/IRenderer.h"
 #include <iostream>
 #include "ResourceManager/ResourceManager.h"
+#include "ResourceManager/Material.h"
 #include "Scene/SceneManager.h"
 #include "Scene/Scene.h"
-#include "Scene/SimpleEntities.h"
+#include "Scene/MeshComponent.h"
+#include "Scene/MaterialComponent.h"
 #include "Scene/SceneSerializer.h"
-#include "Scene/CameraEntity.h"
+#include "Scene/CameraComponent.h"
 #include "Scene/GLTFLoader.h"
 #include "Debug/DebugUI.h"
 #include <glm/glm.hpp>
 #include <filesystem>
+
+namespace {
+
+TNode* BuildTriangleNode() {
+    std::vector<MeshVertex> vertices = {
+        { {-0.5f, -0.5f, 0.0f}, {}, {} },
+        { { 0.5f, -0.5f, 0.0f}, {}, {} },
+        { { 0.0f,  0.5f, 0.0f}, {}, {} },
+    };
+    std::vector<uint32_t> indices = { 0, 1, 2 };
+
+    auto material = std::make_shared<Material>(ResourceManager::LoadShader("basic"));
+
+    TNode* node = new TNode(nullptr, "Triangle");
+    node->AddComponent<MeshComponent>(vertices, indices);
+    node->AddComponent<MaterialComponent>(material);
+    return node;
+}
+
+TNode* BuildSquareNode() {
+    std::vector<MeshVertex> vertices = {
+        { {-0.5f,  0.5f, 0.0f}, {}, {} },
+        { {-0.5f, -0.5f, 0.0f}, {}, {} },
+        { { 0.5f, -0.5f, 0.0f}, {}, {} },
+        { { 0.5f,  0.5f, 0.0f}, {}, {} },
+    };
+    std::vector<uint32_t> indices = { 0, 1, 2, 0, 2, 3 };
+
+    auto material = std::make_shared<Material>(ResourceManager::LoadShader("basic"));
+
+    TNode* node = new TNode(nullptr, "Square");
+    node->AddComponent<MeshComponent>(vertices, indices);
+    node->AddComponent<MaterialComponent>(material);
+    return node;
+}
+
+} // namespace
 
 // ==============================
 // Basic functions
@@ -108,13 +147,13 @@ void Application::SetupScenes()
         std::filesystem::create_directories("scenes");
 
         Scene* triangleScene = sm.CreateScene("Triangle Scene");
-        TNode* triangleNode = new TNode(new TriangleEntity(), nullptr, "Triangle");
+        TNode* triangleNode = BuildTriangleNode();
         triangleNode->transform.position = glm::vec3(0.0f, 0.0f, 0.0f);
         triangleScene->AddNodeToRoot(triangleNode);
         SceneSerializer::SaveScene(triangleScene, "scenes/Triangle Scene.scene");
 
         Scene* squareScene = sm.CreateScene("Square Scene");
-        TNode* squareNode = new TNode(new SquareEntity(), nullptr, "Square");
+        TNode* squareNode = BuildSquareNode();
         squareNode->transform.position = glm::vec3(0.0f, 0.0f, 0.0f);
         squareScene->AddNodeToRoot(squareNode);
         SceneSerializer::SaveScene(squareScene, "scenes/Square Scene.scene");
@@ -128,13 +167,28 @@ void Application::SetupScenes()
             gltfScene->AddNodeToRoot(node);
         }
     }
-    sm.LoadScene("GLTF Scene");
+
+    if (!sm.GetScene("Duck Scene")) {
+        Scene* duckScene = sm.CreateScene("Duck Scene");
+        for (TNode* node : GLTFLoader::LoadModel("resources/models/Duck.glb")) {
+            duckScene->AddNodeToRoot(node);
+        }
+    }
+
+    sm.LoadScene("Duck Scene");
 
     for (const auto& [name, scene] : sm.GetAllScenes()) {
         if (!scene->GetMainCamera()) {
-            TNode* cameraNode = new TNode(nullptr, nullptr, "MainCamera");
-            cameraNode->transform.position = glm::vec3(0.0f, 0.0f, 3.0f);
-            cameraNode->entity = new CameraEntity(cameraNode);
+            TNode* cameraNode = new TNode(nullptr, "MainCamera");
+            CameraComponent* camera = cameraNode->AddComponent<CameraComponent>(cameraNode);
+
+            if (name == "Duck Scene") {
+                cameraNode->transform.position = glm::vec3(0.0f, 50.0f, 150.0f);
+                camera->farPlane = 1000.0f;
+            } else {
+                cameraNode->transform.position = glm::vec3(0.0f, 0.0f, 3.0f);
+            }
+
             scene->AddNodeToRoot(cameraNode);
         }
     }

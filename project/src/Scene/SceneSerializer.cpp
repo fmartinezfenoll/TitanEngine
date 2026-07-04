@@ -1,7 +1,12 @@
 #include "Scene/SceneSerializer.h"
 #include "Scene/Scene.h"
 #include "Scene/TNode.h"
-#include "Scene/SimpleEntities.h"
+#include "Scene/MeshComponent.h"
+#include "Scene/MaterialComponent.h"
+#include "Scene/CameraComponent.h"
+#include "ResourceManager/ResourceManager.h"
+#include "ResourceManager/Material.h"
+#include "ResourceManager/OpenGLShader.h"
 #include "Core/Log.h"
 #include <json.hpp>
 #include <fstream>
@@ -91,43 +96,114 @@ BoundingVolume* DeserializeBoundingVolume(const json& j) {
     return nullptr;
 }
 
-json SerializeEntity(const TEntity* entity) {
-    if (!entity) {
-        return json::object();
-    }
+json SerializeComponents(const TNode* node) {
+    json arr = json::array();
 
-    // Check entity type
-    if (dynamic_cast<const TriangleEntity*>(entity)) {
+    if (auto* mesh = node->GetComponent<MeshComponent>()) {
         json j;
-        j["type"] = "triangle";
-        return j;
+        j["type"] = "mesh";
+
+        json vertices = json::array();
+        for (const MeshVertex& v : mesh->GetVertices()) {
+            vertices.push_back(v.position.x);
+            vertices.push_back(v.position.y);
+            vertices.push_back(v.position.z);
+            vertices.push_back(v.normal.x);
+            vertices.push_back(v.normal.y);
+            vertices.push_back(v.normal.z);
+            vertices.push_back(v.uv.x);
+            vertices.push_back(v.uv.y);
+        }
+        j["vertices"] = vertices;
+        j["indices"] = mesh->GetIndices();
+
+        arr.push_back(j);
     }
 
-    if (dynamic_cast<const SquareEntity*>(entity)) {
+    if (auto* materialComp = node->GetComponent<MaterialComponent>()) {
+        if (const auto& mat = materialComp->material) {
+            json j;
+            j["type"] = "material";
+
+            auto shader = mat->GetShader();
+            j["shader"] = shader ? shader->GetName() : "";
+            j["baseColor"] = {mat->baseColor.r, mat->baseColor.g, mat->baseColor.b, mat->baseColor.a};
+
+            if (mat->albedo || mat->normal || mat->metallicRoughness) {
+                Log::Info("SceneSerializer: skipping texture(s) on material for node '" + node->name +
+                          "' (texture serialization not supported)");
+            }
+
+            arr.push_back(j);
+        }
+    }
+
+    if (auto* camera = node->GetComponent<CameraComponent>()) {
         json j;
-        j["type"] = "square";
-        return j;
+        j["type"] = "camera";
+        j["fov"] = camera->fov;
+        j["nearPlane"] = camera->nearPlane;
+        j["farPlane"] = camera->farPlane;
+        j["moveSpeed"] = camera->moveSpeed;
+        j["mouseSensitivity"] = camera->mouseSensitivity;
+        j["yaw"] = camera->yaw;
+        j["pitch"] = camera->pitch;
+
+        arr.push_back(j);
     }
 
-    return json::object();
+    return arr;
 }
 
-TEntity* DeserializeEntity(const json& j) {
-    if (j.is_null() || j.empty() || !j.contains("type")) {
-        return nullptr;
+void DeserializeComponents(TNode* node, Scene* scene, const json& j) {
+    if (!j.is_array()) return;
+
+    for (const auto& compJson : j) {
+        if (!compJson.contains("type")) continue;
+        std::string type = compJson["type"];
+
+        if (type == "mesh" && compJson.contains("vertices") && compJson.contains("indices")) {
+            std::vector<float> flat = compJson["vertices"].get<std::vector<float>>();
+            std::vector<MeshVertex> vertices;
+            vertices.reserve(flat.size() / 8);
+            for (size_t i = 0; i + 7 < flat.size(); i += 8) {
+                MeshVertex v;
+                v.position = {flat[i], flat[i + 1], flat[i + 2]};
+                v.normal = {flat[i + 3], flat[i + 4], flat[i + 5]};
+                v.uv = {flat[i + 6], flat[i + 7]};
+                vertices.push_back(v);
+            }
+            std::vector<uint32_t> indices = compJson["indices"].get<std::vector<uint32_t>>();
+
+            node->AddComponent<MeshComponent>(vertices, indices);
+        }
+        else if (type == "material" && compJson.contains("shader")) {
+            std::string shaderName = compJson["shader"];
+            auto shader = ResourceManager::LoadShader(shaderName);
+            auto material = std::make_shared<Material>(shader);
+
+            if (compJson.contains("baseColor") && compJson["baseColor"].is_array()) {
+                auto c = compJson["baseColor"];
+                material->baseColor = {c[0], c[1], c[2], c[3]};
+            }
+
+            node->AddComponent<MaterialComponent>(material);
+        }
+        else if (type == "camera") {
+            auto* camera = node->AddComponent<CameraComponent>(node);
+            if (compJson.contains("fov")) camera->fov = compJson["fov"];
+            if (compJson.contains("nearPlane")) camera->nearPlane = compJson["nearPlane"];
+            if (compJson.contains("farPlane")) camera->farPlane = compJson["farPlane"];
+            if (compJson.contains("moveSpeed")) camera->moveSpeed = compJson["moveSpeed"];
+            if (compJson.contains("mouseSensitivity")) camera->mouseSensitivity = compJson["mouseSensitivity"];
+            if (compJson.contains("yaw")) camera->yaw = compJson["yaw"];
+            if (compJson.contains("pitch")) camera->pitch = compJson["pitch"];
+
+            if (scene) {
+                scene->RegisterCamera(node);
+            }
+        }
     }
-
-    std::string type = j["type"];
-
-    if (type == "triangle") {
-        return new TriangleEntity();
-    }
-
-    if (type == "square") {
-        return new SquareEntity();
-    }
-
-    return nullptr;
 }
 
 json SerializeNode(const TNode* node) {
@@ -141,14 +217,15 @@ json SerializeNode(const TNode* node) {
     // Serialize transform
     j["transform"] = SerializeTransform(node->transform);
 
-    // Serialize entity
-    if (node->entity) {
-        j["entity"] = SerializeEntity(node->entity);
-    }
-
     // Serialize bounding volume
     if (node->boundingBox) {
         j["boundingBox"] = SerializeBoundingVolume(node->boundingBox);
+    }
+
+    // Serialize components
+    json components = SerializeComponents(node);
+    if (!components.empty()) {
+        j["components"] = components;
     }
 
     // Serialize children
@@ -163,12 +240,7 @@ json SerializeNode(const TNode* node) {
     return j;
 }
 
-TNode* DeserializeNode(const json& j) {
-    TEntity* entity = nullptr;
-    if (j.contains("entity") && !j["entity"].empty()) {
-        entity = DeserializeEntity(j["entity"]);
-    }
-
+TNode* DeserializeNode(const json& j, Scene* scene) {
     BoundingVolume* boundingBox = nullptr;
     if (j.contains("boundingBox") && !j["boundingBox"].empty()) {
         boundingBox = DeserializeBoundingVolume(j["boundingBox"]);
@@ -179,17 +251,22 @@ TNode* DeserializeNode(const json& j) {
         nodeName = j["name"];
     }
 
-    TNode* node = new TNode(entity, boundingBox, nodeName);
+    TNode* node = new TNode(boundingBox, nodeName);
 
     // Deserialize transform
     if (j.contains("transform")) {
         node->transform = DeserializeTransform(j["transform"]);
     }
 
+    // Deserialize components
+    if (j.contains("components")) {
+        DeserializeComponents(node, scene, j["components"]);
+    }
+
     // Deserialize children
     if (j.contains("children") && j["children"].is_array()) {
         for (const auto& child_j : j["children"]) {
-            TNode* child = DeserializeNode(child_j);
+            TNode* child = DeserializeNode(child_j, scene);
             if (child) {
                 node->addChild(child);
             }
@@ -249,7 +326,7 @@ Scene* SceneSerializer::LoadScene(const std::string& filePath) {
         scene->Init();
 
         if (j.contains("root")) {
-            TNode* root = DeserializeNode(j["root"]);
+            TNode* root = DeserializeNode(j["root"], scene);
             if (root) {
                 scene->GetRoot()->addChild(root);
             }

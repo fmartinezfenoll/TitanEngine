@@ -1,18 +1,19 @@
-#include "Scene/MeshEntity.h"
-#include "ResourceManager/Material.h"
-#include "ResourceManager/OpenGLShader.h"
-#include "Scene/CameraEntity.h"
+#include "Scene/MeshComponent.h"
+#include "Scene/MaterialComponent.h"
+#include "Scene/CameraComponent.h"
 #include "Scene/SceneManager.h"
 #include "Scene/Scene.h"
 #include "Scene/TNode.h"
+#include "ResourceManager/Material.h"
+#include "ResourceManager/OpenGLShader.h"
 #include "Renderer/Viewport.h"
 #include <glad/glad.h>
 #include <glm/gtc/matrix_transform.hpp>
 
-MeshEntity::MeshEntity(const std::vector<MeshVertex>& vertices,
-                       const std::vector<uint32_t>& indices,
-                       const std::shared_ptr<Material>& material)
-    : m_IndexCount(indices.size()), m_Material(material)
+MeshComponent::MeshComponent(const std::vector<MeshVertex>& vertices,
+                             const std::vector<uint32_t>& indices)
+    : m_VertexCount(vertices.size()), m_IndexCount(indices.size()),
+      m_Vertices(vertices), m_Indices(indices)
 {
     glGenVertexArrays(1, &m_VAO);
     glGenBuffers(1, &m_VBO);
@@ -38,16 +39,16 @@ MeshEntity::MeshEntity(const std::vector<MeshVertex>& vertices,
     glBindVertexArray(0);
 }
 
-MeshEntity::~MeshEntity() {
+MeshComponent::~MeshComponent() {
     glDeleteVertexArrays(1, &m_VAO);
     glDeleteBuffers(1, &m_VBO);
     glDeleteBuffers(1, &m_EBO);
 }
 
-void MeshEntity::draw(const glm::mat4& modelMatrix) {
-    if (!m_Material) return;
+void MeshComponent::Draw(const glm::mat4& modelMatrix, MaterialComponent* material) const {
+    if (!material || !material->material) return;
 
-    auto shader = m_Material->GetShader();
+    auto shader = material->material->GetShader();
     if (!shader) return;
 
     glm::mat4 view = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -3.0f));
@@ -57,14 +58,14 @@ void MeshEntity::draw(const glm::mat4& modelMatrix) {
     if (activeScene && activeScene->GetMainCamera())
     {
         TNode* cameraNode = activeScene->GetMainCamera();
-        if (auto* camera = dynamic_cast<CameraEntity*>(cameraNode->entity))
+        if (auto* camera = cameraNode->GetComponent<CameraComponent>())
         {
             view = camera->GetViewMatrix();
             projection = camera->GetProjectionMatrix(Viewport::GetAspectRatio());
         }
     }
 
-    m_Material->Bind();
+    material->Bind();
     shader->SetMat4("projection", projection);
     shader->SetMat4("view", view);
     shader->SetMat4("model", modelMatrix);

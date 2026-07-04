@@ -1,6 +1,5 @@
 #pragma once
 #include "Scene/TNode.h"
-#include "Scene/TEntity.h"
 #include <vector>
 
 class Scene {
@@ -11,7 +10,7 @@ public:
     void Init();
 
     TNode* GetRoot() { return m_root; }
-    TNode* CreateNode(TEntity* entity = nullptr, BoundingVolume* boundingBox = nullptr);
+    TNode* CreateNode(BoundingVolume* boundingBox = nullptr);
 
     void AddNodeToRoot(TNode* node);
     void RemoveNode(TNode* node);

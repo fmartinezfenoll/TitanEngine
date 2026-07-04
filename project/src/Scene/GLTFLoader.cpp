@@ -1,6 +1,7 @@
 #include "Scene/GLTFLoader.h"
 #include "Scene/TNode.h"
-#include "Scene/MeshEntity.h"
+#include "Scene/MeshComponent.h"
+#include "Scene/MaterialComponent.h"
 #include "ResourceManager/ResourceManager.h"
 #include "ResourceManager/OpenGLShader.h"
 #include "ResourceManager/Material.h"
@@ -159,7 +160,7 @@ AABB* ComputeAABB(const std::vector<MeshVertex>& vertices)
 }
 
 TNode* ProcessMesh(const tinygltf::Primitive& primitive, const tinygltf::Model& model,
-                    const std::string& path, const std::string& baseDir)
+                    const std::string& path, const std::string& baseDir, const std::string& meshLabel)
 {
     if (primitive.attributes.find("POSITION") == primitive.attributes.end())
         return nullptr;
@@ -213,25 +214,38 @@ TNode* ProcessMesh(const tinygltf::Primitive& primitive, const tinygltf::Model& 
     if (!material)
         return nullptr;
 
-    MeshEntity* mesh = new MeshEntity(vertices, indices, material);
-    TNode* node = new TNode(mesh, ComputeAABB(vertices));
+    TNode* node = new TNode(ComputeAABB(vertices), meshLabel);
+    node->AddComponent<MeshComponent>(vertices, indices);
+    node->AddComponent<MaterialComponent>(material);
     return node;
 }
 
 std::vector<TNode*> ProcessNode(const tinygltf::Node& gltfNode, const tinygltf::Model& model,
-                                 const std::string& path, const std::string& baseDir)
+                                 const std::string& path, const std::string& baseDir, int nodeIndex)
 {
     std::vector<TNode*> result;
 
-    TNode* container = new TNode(nullptr, nullptr, gltfNode.name);
+    bool hasMesh = gltfNode.mesh >= 0 && gltfNode.mesh < static_cast<int>(model.meshes.size());
+
+    std::string nodeName = gltfNode.name;
+    if (nodeName.empty())
+        nodeName = (hasMesh ? "Node_" : "Group_") + std::to_string(nodeIndex);
+
+    TNode* container = new TNode(nullptr, nodeName);
     container->transform = GetNodeTransform(gltfNode);
 
-    if (gltfNode.mesh >= 0 && gltfNode.mesh < static_cast<int>(model.meshes.size()))
+    if (hasMesh)
     {
         const auto& mesh = model.meshes[gltfNode.mesh];
-        for (const auto& primitive : mesh.primitives)
+        std::string meshBaseName = mesh.name.empty() ? "Mesh_" + std::to_string(gltfNode.mesh) : mesh.name;
+
+        for (size_t primIndex = 0; primIndex < mesh.primitives.size(); ++primIndex)
         {
-            TNode* meshNode = ProcessMesh(primitive, model, path, baseDir);
+            std::string meshLabel = mesh.primitives.size() > 1
+                ? meshBaseName + "_" + std::to_string(primIndex)
+                : meshBaseName;
+
+            TNode* meshNode = ProcessMesh(mesh.primitives[primIndex], model, path, baseDir, meshLabel);
             if (meshNode)
                 container->addChild(meshNode);
         }
@@ -241,7 +255,7 @@ std::vector<TNode*> ProcessNode(const tinygltf::Node& gltfNode, const tinygltf::
     {
         if (childIndex < 0 || childIndex >= static_cast<int>(model.nodes.size()))
             continue;
-        auto childNodes = ProcessNode(model.nodes[childIndex], model, path, baseDir);
+        auto childNodes = ProcessNode(model.nodes[childIndex], model, path, baseDir, childIndex);
         for (TNode* child : childNodes)
             container->addChild(child);
     }
@@ -252,9 +266,26 @@ std::vector<TNode*> ProcessNode(const tinygltf::Node& gltfNode, const tinygltf::
 
 } // namespace
 
+namespace {
+
+// tinygltf normally decodes images itself via stb_image; since that path is
+// disabled (TINYGLTF_NO_STB_IMAGE, Texture does the decoding instead), just
+// stash the raw encoded bytes so LoadGltfTexture can decode them later.
+bool StoreRawImageBytes(tinygltf::Image* image, const int, std::string*, std::string*,
+                         int, int, const unsigned char* bytes, int size, void*)
+{
+    image->image.assign(bytes, bytes + size);
+    image->as_is = true;
+    return true;
+}
+
+} // namespace
+
 std::vector<TNode*> GLTFLoader::LoadModel(const std::string& path)
 {
     tinygltf::TinyGLTF loader;
+    loader.SetImageLoader(StoreRawImageBytes, nullptr);
+
     tinygltf::Model model;
     std::string err, warn;
 
@@ -280,7 +311,7 @@ std::vector<TNode*> GLTFLoader::LoadModel(const std::string& path)
     {
         if (nodeIndex < 0 || nodeIndex >= static_cast<int>(model.nodes.size()))
             continue;
-        auto processed = ProcessNode(model.nodes[nodeIndex], model, path, baseDir);
+        auto processed = ProcessNode(model.nodes[nodeIndex], model, path, baseDir, nodeIndex);
         nodes.insert(nodes.end(), processed.begin(), processed.end());
     }
 

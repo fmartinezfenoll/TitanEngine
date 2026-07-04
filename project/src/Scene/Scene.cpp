@@ -1,5 +1,5 @@
 #include "Scene/Scene.h"
-#include "Scene/CameraEntity.h"
+#include "Scene/CameraComponent.h"
 #include <algorithm>
 
 Scene::~Scene() {
@@ -8,12 +8,12 @@ Scene::~Scene() {
 
 void Scene::Init() {
     if (!m_root) {
-        m_root = new TNode(nullptr, nullptr);
+        m_root = new TNode(nullptr);
     }
 }
 
-TNode* Scene::CreateNode(TEntity* entity, BoundingVolume* boundingBox) {
-    return new TNode(entity, boundingBox);
+TNode* Scene::CreateNode(BoundingVolume* boundingBox) {
+    return new TNode(boundingBox);
 }
 
 void Scene::AddNodeToRoot(TNode* node) {
@@ -22,7 +22,7 @@ void Scene::AddNodeToRoot(TNode* node) {
     }
     m_root->addChild(node);
 
-    if (node && dynamic_cast<CameraEntity*>(node->entity)) {
+    if (node && node->GetComponent<CameraComponent>()) {
         RegisterCamera(node);
     }
 }
