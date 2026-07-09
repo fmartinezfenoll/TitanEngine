@@ -7,12 +7,18 @@
 #include "Scene/Scene.h"
 #include "Scene/TNode.h"
 #include "Scene/CameraComponent.h"
+#include "Scene/LightComponent.h"
+#include "Scene/MeshComponent.h"
+#include "Renderer/GizmoRenderer.h"
+#include "Debug/DebugUI.h"
 
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <imgui.h>
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <iostream>
+#include <limits>
 
 // ImGui backend function declarations (headers not available, declared from backends/*.cpp)
 extern bool ImGui_ImplGlfw_InitForOpenGL(GLFWwindow* window, bool install_callbacks);
@@ -111,6 +117,8 @@ bool OpenGLRenderer::Init(int width, int height, const std::string& appName)
     ImGui_ImplGlfw_InitForOpenGL(static_cast<GLFWwindow*>(window), true);
     ImGui_ImplOpenGL3_Init("#version 450");
 
+    GizmoRenderer::Init();
+
     std::cout << "OpenGL Version: " << glGetString(GL_VERSION) << std::endl;
     std::cout << "Renderer: " << glGetString(GL_RENDERER) << std::endl;
 
@@ -120,6 +128,7 @@ bool OpenGLRenderer::Init(int width, int height, const std::string& appName)
 
 void OpenGLRenderer::Shutdown()
 {
+    GizmoRenderer::Shutdown();
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
@@ -198,8 +207,129 @@ void OpenGLRenderer::Render()
         if (root) {
             activeScene->Draw(frustum);
         }
+        DrawGizmos(activeScene);
+        DrawSelectionHighlight(activeScene);
+        DrawTransformGizmo(activeScene);
     }
 }
+
+void OpenGLRenderer::DrawGizmos(Scene* activeScene)
+{
+    glm::mat4 view = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -3.0f));
+    glm::mat4 projection = glm::perspective(glm::radians(60.0f), Viewport::GetAspectRatio(), 0.1f, 100.0f);
+
+    if (TNode* cameraNode = activeScene->GetMainCamera()) {
+        if (auto* camera = cameraNode->GetComponent<CameraComponent>()) {
+            view = camera->GetViewMatrix();
+            projection = camera->GetProjectionMatrix(Viewport::GetAspectRatio());
+        }
+    }
+
+    for (TNode* lightNode : activeScene->GetLights()) {
+        if (auto* light = lightNode->GetComponent<LightComponent>()) {
+            GizmoRenderer::DrawLightGizmo(light->GetPosition(), light->color, view, projection);
+        }
+    }
+
+    TNode* mainCameraNode = activeScene->GetMainCamera();
+    for (TNode* cameraNode : activeScene->GetCameras()) {
+        if (cameraNode == mainCameraNode) continue;
+        GizmoRenderer::DrawCameraGizmo(cameraNode->getModelMatrix(), view, projection);
+    }
+}
+
+void OpenGLRenderer::DrawSelectionHighlight(Scene* activeScene)
+{
+    TNode* selected = DebugUI::GetSelectedNode();
+    if (!selected) return;
+
+    glm::mat4 view = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -3.0f));
+    glm::mat4 projection = glm::perspective(glm::radians(60.0f), Viewport::GetAspectRatio(), 0.1f, 100.0f);
+    if (TNode* cameraNode = activeScene->GetMainCamera()) {
+        if (auto* camera = cameraNode->GetComponent<CameraComponent>()) {
+            view = camera->GetViewMatrix();
+            projection = camera->GetProjectionMatrix(Viewport::GetAspectRatio());
+        }
+    }
+
+    if (auto* mesh = selected->GetComponent<MeshComponent>()) {
+        glm::vec3 localMin, localMax;
+        mesh->GetLocalBounds(localMin, localMax);
+
+        glm::mat4 model = selected->getModelMatrix();
+        glm::vec3 worldMin(std::numeric_limits<float>::max());
+        glm::vec3 worldMax(-std::numeric_limits<float>::max());
+        for (int i = 0; i < 8; ++i) {
+            glm::vec3 corner(
+                (i & 1) ? localMax.x : localMin.x,
+                (i & 2) ? localMax.y : localMin.y,
+                (i & 4) ? localMax.z : localMin.z);
+            glm::vec3 worldCorner = glm::vec3(model * glm::vec4(corner, 1.0f));
+            worldMin = glm::min(worldMin, worldCorner);
+            worldMax = glm::max(worldMax, worldCorner);
+        }
+
+        glm::vec3 center = (worldMin + worldMax) * 0.5f;
+        glm::vec3 extents = (worldMax - worldMin) * 0.5f;
+        GizmoRenderer::DrawSelectionBox(center, extents, view, projection);
+        return;
+    }
+
+    if (auto* light = selected->GetComponent<LightComponent>()) {
+        GizmoRenderer::DrawSelectionBox(light->GetPosition(),
+            glm::vec3(GizmoRenderer::kLightGizmoRadius * 1.3f), view, projection);
+        return;
+    }
+
+    if (selected->GetComponent<CameraComponent>()) {
+        GizmoRenderer::DrawSelectionBox(selected->getGlobalPosition(),
+            glm::vec3(GizmoRenderer::kCameraGizmoRadius * 1.3f), view, projection);
+    }
+}
+
+void OpenGLRenderer::DrawTransformGizmo(Scene* activeScene)
+{
+    TNode* selected = DebugUI::GetSelectedNode();
+    if (!selected) return;
+
+    glm::mat4 view = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -3.0f));
+    glm::mat4 projection = glm::perspective(glm::radians(60.0f), Viewport::GetAspectRatio(), 0.1f, 100.0f);
+    glm::vec3 cameraWorldPos(0.0f, 0.0f, 3.0f);
+    if (TNode* cameraNode = activeScene->GetMainCamera()) {
+        if (auto* camera = cameraNode->GetComponent<CameraComponent>()) {
+            view = camera->GetViewMatrix();
+            projection = camera->GetProjectionMatrix(Viewport::GetAspectRatio());
+            cameraWorldPos = cameraNode->transform.position;
+        }
+    }
+
+    glm::vec3 worldPos = selected->getGlobalPosition();
+    glm::mat4 baseRotation = selected->getModelMatrix();
+    baseRotation[3] = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+    glm::vec3 scaleCol0 = glm::vec3(baseRotation[0]);
+    glm::vec3 scaleCol1 = glm::vec3(baseRotation[1]);
+    glm::vec3 scaleCol2 = glm::vec3(baseRotation[2]);
+    if (glm::length(scaleCol0) > 1e-6f) baseRotation[0] /= glm::length(scaleCol0);
+    if (glm::length(scaleCol1) > 1e-6f) baseRotation[1] /= glm::length(scaleCol1);
+    if (glm::length(scaleCol2) > 1e-6f) baseRotation[2] /= glm::length(scaleCol2);
+
+    float scale = GizmoRenderer::ComputeGizmoScale(worldPos, cameraWorldPos);
+
+    glDisable(GL_DEPTH_TEST);
+    switch (DebugUI::GetGizmoMode()) {
+        case GizmoMode::Move:
+            GizmoRenderer::DrawMoveGizmo(worldPos, baseRotation, scale, view, projection);
+            break;
+        case GizmoMode::Rotate:
+            GizmoRenderer::DrawRotateGizmo(worldPos, baseRotation, scale, view, projection);
+            break;
+        case GizmoMode::Scale:
+            GizmoRenderer::DrawScaleGizmo(worldPos, baseRotation, scale, view, projection);
+            break;
+    }
+    glEnable(GL_DEPTH_TEST);
+}
+
 void OpenGLRenderer::EndFrame()
 {
     ImGui::Render();

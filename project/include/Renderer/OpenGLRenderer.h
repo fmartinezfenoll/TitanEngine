@@ -3,6 +3,8 @@
 #include "Renderer/IRenderer.h"
 #include <string>
 
+class Scene;
+
 class OpenGLRenderer : public IRenderer
 {
 public:
@@ -35,4 +37,7 @@ private:
     double m_lastMouseY = 0.0;
 
     void UpdateCameraInput(float deltaTime);
+    void DrawGizmos(Scene* activeScene);
+    void DrawSelectionHighlight(Scene* activeScene);
+    void DrawTransformGizmo(Scene* activeScene);
 };

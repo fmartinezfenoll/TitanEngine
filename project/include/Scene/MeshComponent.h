@@ -29,6 +29,11 @@ public:
     const std::vector<MeshVertex>& GetVertices() const { return m_Vertices; }
     const std::vector<uint32_t>& GetIndices() const { return m_Indices; }
 
+    void GetLocalBounds(glm::vec3& outMin, glm::vec3& outMax) const {
+        outMin = m_LocalMin;
+        outMax = m_LocalMax;
+    }
+
 private:
     unsigned int m_VAO = 0;
     unsigned int m_VBO = 0;
@@ -37,4 +42,6 @@ private:
     size_t m_IndexCount = 0;
     std::vector<MeshVertex> m_Vertices;
     std::vector<uint32_t> m_Indices;
+    glm::vec3 m_LocalMin{0.0f};
+    glm::vec3 m_LocalMax{0.0f};
 };

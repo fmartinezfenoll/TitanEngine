@@ -27,8 +27,13 @@ public:
     void SetMainCamera(TNode* cameraNode) { m_mainCamera = cameraNode; }
     TNode* GetMainCamera() const { return m_mainCamera; }
 
+    void RegisterLight(TNode* lightNode);
+    void UnregisterLight(TNode* lightNode);
+    const std::vector<TNode*>& GetLights() const { return m_lights; }
+
 private:
     TNode* m_root = nullptr;
     std::vector<TNode*> m_cameras;
     TNode* m_mainCamera = nullptr;
+    std::vector<TNode*> m_lights;
 };

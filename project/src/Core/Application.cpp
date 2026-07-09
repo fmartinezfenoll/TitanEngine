@@ -11,6 +11,7 @@
 #include "Scene/MaterialComponent.h"
 #include "Scene/SceneSerializer.h"
 #include "Scene/CameraComponent.h"
+#include "Scene/LightComponent.h"
 #include "Scene/GLTFLoader.h"
 #include "Debug/DebugUI.h"
 #include <glm/glm.hpp>
@@ -190,6 +191,13 @@ void Application::SetupScenes()
             }
 
             scene->AddNodeToRoot(cameraNode);
+        }
+
+        if (scene->GetLights().empty()) {
+            TNode* lightNode = new TNode(nullptr, "DirectionalLight1");
+            lightNode->AddComponent<LightComponent>(lightNode, LightType::Directional);
+            lightNode->transform.rotation = glm::vec3(-50.0f, -30.0f, 0.0f);
+            scene->AddNodeToRoot(lightNode);
         }
     }
 }

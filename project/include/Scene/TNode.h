@@ -180,6 +180,16 @@ public:
         return false;
     }
 
+    bool RemoveComponent(Component* component) {
+        for (auto it = components.begin(); it != components.end(); ++it) {
+            if (it->get() == component) {
+                components.erase(it);
+                return true;
+            }
+        }
+        return false;
+    }
+
     void addChild(TNode* node) {
         if (node && node != this) {
             node->removeFromParent();

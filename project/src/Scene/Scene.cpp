@@ -1,5 +1,6 @@
 #include "Scene/Scene.h"
 #include "Scene/CameraComponent.h"
+#include "Scene/LightComponent.h"
 #include <algorithm>
 
 Scene::~Scene() {
@@ -24,6 +25,10 @@ void Scene::AddNodeToRoot(TNode* node) {
 
     if (node && node->GetComponent<CameraComponent>()) {
         RegisterCamera(node);
+    }
+
+    if (node && node->GetComponent<LightComponent>()) {
+        RegisterLight(node);
     }
 }
 
@@ -50,6 +55,7 @@ void Scene::Clear() {
     }
     m_cameras.clear();
     m_mainCamera = nullptr;
+    m_lights.clear();
 }
 
 void Scene::RegisterCamera(TNode* cameraNode) {
@@ -67,5 +73,17 @@ void Scene::UnregisterCamera(TNode* cameraNode) {
     }
     if (m_mainCamera == cameraNode) {
         m_mainCamera = m_cameras.empty() ? nullptr : m_cameras.front();
+    }
+}
+
+void Scene::RegisterLight(TNode* lightNode) {
+    if (!lightNode) return;
+    m_lights.push_back(lightNode);
+}
+
+void Scene::UnregisterLight(TNode* lightNode) {
+    auto it = std::find(m_lights.begin(), m_lights.end(), lightNode);
+    if (it != m_lights.end()) {
+        m_lights.erase(it);
     }
 }

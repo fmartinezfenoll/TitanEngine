@@ -4,9 +4,11 @@
 #include "Scene/MeshComponent.h"
 #include "Scene/MaterialComponent.h"
 #include "Scene/CameraComponent.h"
+#include "Scene/LightComponent.h"
 #include "ResourceManager/ResourceManager.h"
 #include "ResourceManager/Material.h"
 #include "ResourceManager/OpenGLShader.h"
+#include "ResourceManager/Texture.h"
 #include "Core/Log.h"
 #include <json.hpp>
 #include <fstream>
@@ -129,10 +131,21 @@ json SerializeComponents(const TNode* node) {
             j["shader"] = shader ? shader->GetName() : "";
             j["baseColor"] = {mat->baseColor.r, mat->baseColor.g, mat->baseColor.b, mat->baseColor.a};
 
-            if (mat->albedo || mat->normal || mat->metallicRoughness) {
-                Log::Info("SceneSerializer: skipping texture(s) on material for node '" + node->name +
-                          "' (texture serialization not supported)");
-            }
+            auto serializeTextureSlot = [&](const char* key, const std::shared_ptr<Texture>& tex) {
+                if (!tex) return;
+                if (tex->GetFilePath().empty()) {
+                    Log::Info("SceneSerializer: skipping embedded texture on material for node '" + node->name +
+                              "' (no file path to persist)");
+                    return;
+                }
+                json t;
+                t["name"] = tex->GetName();
+                t["path"] = tex->GetFilePath();
+                j[key] = t;
+            };
+            serializeTextureSlot("albedo", mat->albedo);
+            serializeTextureSlot("normal", mat->normal);
+            serializeTextureSlot("metallicRoughness", mat->metallicRoughness);
 
             arr.push_back(j);
         }
@@ -148,6 +161,19 @@ json SerializeComponents(const TNode* node) {
         j["mouseSensitivity"] = camera->mouseSensitivity;
         j["yaw"] = camera->yaw;
         j["pitch"] = camera->pitch;
+
+        arr.push_back(j);
+    }
+
+    if (auto* light = node->GetComponent<LightComponent>()) {
+        json j;
+        j["type"] = "light";
+        j["lightType"] = static_cast<int>(light->type);
+        j["color"] = {light->color.r, light->color.g, light->color.b};
+        j["intensity"] = light->intensity;
+        j["range"] = light->range;
+        j["innerConeDegrees"] = light->innerConeDegrees;
+        j["outerConeDegrees"] = light->outerConeDegrees;
 
         arr.push_back(j);
     }
@@ -187,6 +213,16 @@ void DeserializeComponents(TNode* node, Scene* scene, const json& j) {
                 material->baseColor = {c[0], c[1], c[2], c[3]};
             }
 
+            auto deserializeTextureSlot = [&](const char* key, std::shared_ptr<Texture>& slot) {
+                if (!compJson.contains(key)) return;
+                const auto& t = compJson[key];
+                if (!t.contains("name") || !t.contains("path")) return;
+                slot = ResourceManager::LoadTexture(t["name"], t["path"]);
+            };
+            deserializeTextureSlot("albedo", material->albedo);
+            deserializeTextureSlot("normal", material->normal);
+            deserializeTextureSlot("metallicRoughness", material->metallicRoughness);
+
             node->AddComponent<MaterialComponent>(material);
         }
         else if (type == "camera") {
@@ -201,6 +237,26 @@ void DeserializeComponents(TNode* node, Scene* scene, const json& j) {
 
             if (scene) {
                 scene->RegisterCamera(node);
+            }
+        }
+        else if (type == "light") {
+            LightType lightType = LightType::Point;
+            if (compJson.contains("lightType")) {
+                lightType = static_cast<LightType>(compJson["lightType"].get<int>());
+            }
+
+            auto* light = node->AddComponent<LightComponent>(node, lightType);
+            if (compJson.contains("color") && compJson["color"].is_array()) {
+                auto c = compJson["color"];
+                light->color = {c[0], c[1], c[2]};
+            }
+            if (compJson.contains("intensity")) light->intensity = compJson["intensity"];
+            if (compJson.contains("range")) light->range = compJson["range"];
+            if (compJson.contains("innerConeDegrees")) light->innerConeDegrees = compJson["innerConeDegrees"];
+            if (compJson.contains("outerConeDegrees")) light->outerConeDegrees = compJson["outerConeDegrees"];
+
+            if (scene) {
+                scene->RegisterLight(node);
             }
         }
     }

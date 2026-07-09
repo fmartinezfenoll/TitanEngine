@@ -18,12 +18,14 @@ public:
     int GetWidth() const { return m_Width; }
     int GetHeight() const { return m_Height; }
     bool IsValid() const { return m_ID != 0; }
+    const std::string& GetFilePath() const { return m_FilePath; }
 
 private:
     unsigned int m_ID = 0;
     int m_Width = 0;
     int m_Height = 0;
     int m_Channels = 0;
+    std::string m_FilePath;
 
     void UploadFromMemory(const unsigned char* pixels);
 };

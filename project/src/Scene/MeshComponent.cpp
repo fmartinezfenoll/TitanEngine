@@ -1,6 +1,7 @@
 #include "Scene/MeshComponent.h"
 #include "Scene/MaterialComponent.h"
 #include "Scene/CameraComponent.h"
+#include "Scene/LightComponent.h"
 #include "Scene/SceneManager.h"
 #include "Scene/Scene.h"
 #include "Scene/TNode.h"
@@ -9,12 +10,25 @@
 #include "Renderer/Viewport.h"
 #include <glad/glad.h>
 #include <glm/gtc/matrix_transform.hpp>
+#include <string>
+
+namespace {
+constexpr int kMaxLights = 32;
+}
 
 MeshComponent::MeshComponent(const std::vector<MeshVertex>& vertices,
                              const std::vector<uint32_t>& indices)
     : m_VertexCount(vertices.size()), m_IndexCount(indices.size()),
       m_Vertices(vertices), m_Indices(indices)
 {
+    if (!vertices.empty()) {
+        m_LocalMin = m_LocalMax = vertices[0].position;
+        for (const MeshVertex& v : vertices) {
+            m_LocalMin = glm::min(m_LocalMin, v.position);
+            m_LocalMax = glm::max(m_LocalMax, v.position);
+        }
+    }
+
     glGenVertexArrays(1, &m_VAO);
     glGenBuffers(1, &m_VBO);
     glGenBuffers(1, &m_EBO);
@@ -69,6 +83,32 @@ void MeshComponent::Draw(const glm::mat4& modelMatrix, MaterialComponent* materi
     shader->SetMat4("projection", projection);
     shader->SetMat4("view", view);
     shader->SetMat4("model", modelMatrix);
+
+    int lightCount = 0;
+    if (activeScene)
+    {
+        const auto& lights = activeScene->GetLights();
+        for (TNode* lightNode : lights)
+        {
+            if (lightCount >= kMaxLights) break;
+
+            auto* light = lightNode->GetComponent<LightComponent>();
+            if (!light) continue;
+
+            std::string prefix = "lights[" + std::to_string(lightCount) + "].";
+            shader->SetInt(prefix + "type", static_cast<int>(light->type));
+            shader->SetVec3(prefix + "position", light->GetPosition());
+            shader->SetVec3(prefix + "direction", light->GetDirection());
+            shader->SetVec3(prefix + "color", light->color);
+            shader->SetFloat(prefix + "intensity", light->intensity);
+            shader->SetFloat(prefix + "range", light->range);
+            shader->SetFloat(prefix + "innerCutoff", glm::cos(glm::radians(light->innerConeDegrees)));
+            shader->SetFloat(prefix + "outerCutoff", glm::cos(glm::radians(light->outerConeDegrees)));
+
+            ++lightCount;
+        }
+    }
+    shader->SetInt("lightCount", lightCount);
 
     glBindVertexArray(m_VAO);
     glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(m_IndexCount), GL_UNSIGNED_INT, 0);

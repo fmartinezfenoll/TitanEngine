@@ -5,7 +5,7 @@
 #include <stb_image.h>
 
 Texture::Texture(const std::string& name, const std::string& filePath)
-    : Resource(name)
+    : Resource(name), m_FilePath(filePath)
 {
     // glTF UVs have V=0 at the top, matching stb_image's default row order
     // (row 0 = top of the source image) against OpenGL's texture storage
