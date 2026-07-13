@@ -31,6 +31,10 @@ public:
     Scene* LoadSceneFromFile(const std::string& filePath);
     void LoadAllScenesFromDirectory(const std::string& directory);
 
+    // Loads a single scene file and registers it under an explicit name, without touching
+    // any other already-loaded scene (unlike LoadAllScenesFromDirectory, which reloads everything).
+    Scene* LoadSceneNamed(const std::string& name, const std::string& filePath);
+
 private:
     SceneManager() = default;
     ~SceneManager();

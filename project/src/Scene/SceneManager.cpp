@@ -132,6 +132,24 @@ Scene* SceneManager::LoadSceneFromFile(const std::string& filePath) {
     return scene;
 }
 
+Scene* SceneManager::LoadSceneNamed(const std::string& name, const std::string& filePath) {
+    if (scenes.find(name) != scenes.end()) {
+        return nullptr;
+    }
+
+    Scene* scene = SceneSerializer::LoadScene(filePath);
+    if (!scene) {
+        return nullptr;
+    }
+
+    scene->Init();
+    auto scene_ptr = std::make_shared<Scene>();
+    scene_ptr.reset(scene);
+    scenes[name] = scene_ptr;
+
+    return scene;
+}
+
 void SceneManager::LoadAllScenesFromDirectory(const std::string& directory) {
     if (!std::filesystem::exists(directory)) {
         Log::Info("Scenes directory does not exist: " + directory);

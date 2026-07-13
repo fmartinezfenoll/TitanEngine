@@ -15,6 +15,7 @@
 #include "Renderer/Viewport.h"
 #include "Renderer/Skybox.h"
 #include "ResourceManager/CubemapTexture.h"
+#include "Debug/ProjectBrowser.h"
 #include "Core/Stats.h"
 #include "Core/EngineSettings.h"
 #include "Core/EngineConfig.h"
@@ -1000,19 +1001,7 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
                 ImGui::EndTabItem();
             }
 
-            // Tab 2: Resources
-            if (ImGui::BeginTabItem("Resources")) {
-                ImGui::Text("Loaded Resources:");
-                ImGui::Separator();
-
-                ImGui::BeginChild("ResourcesChild", ImVec2(0, 400), true);
-                DrawResourcesTree();
-                ImGui::EndChild();
-
-                ImGui::EndTabItem();
-            }
-
-            // Tab 3: Camera
+            // Tab 2: Camera
             if (ImGui::BeginTabItem("Camera")) {
                 ImGui::BeginChild("CameraChild", ImVec2(0, 400), true);
                 DrawCameraTab(sceneManager);
@@ -1023,6 +1012,13 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
 
             ImGui::EndTabBar();
         }
+    }
+    ImGui::End();
+
+    ImGui::SetNextWindowPos(ImVec2(10, 730), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(700, 320), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Project", nullptr)) {
+        ProjectBrowser::Draw(sceneManager, activeScene);
     }
     ImGui::End();
 
@@ -1203,41 +1199,6 @@ void DebugUI::DrawSceneTree(TNode* node, Scene* activeScene, int depth) {
     }
 }
 
-void DebugUI::DrawResourcesTree() {
-    ImGui::Text("Shaders:");
-    ImGui::Separator();
-
-    const auto& shaders = ResourceManager::GetAllShaders();
-    ImGui::BulletText("Shaders Loaded: %zu", shaders.size());
-    ImGui::Indent();
-
-    for (const auto& [name, shader] : shaders) {
-        if (ImGui::TreeNodeEx(name.c_str(), ImGuiTreeNodeFlags_Leaf)) {
-            ImGui::BulletText("Vertex: resources/shaders/%s.vert", name.c_str());
-            ImGui::BulletText("Fragment: resources/shaders/%s.frag", name.c_str());
-            ImGui::TreePop();
-        }
-    }
-
-    ImGui::Unindent();
-
-    ImGui::Spacing();
-    ImGui::Text("Memory Usage:");
-    ImGui::Separator();
-    ImGui::BulletText("Shaders Loaded: %zu", shaders.size());
-
-    int totalShaderFiles = 0;
-    std::filesystem::path shadersDir("resources/shaders");
-    if (std::filesystem::exists(shadersDir)) {
-        for (const auto& entry : std::filesystem::directory_iterator(shadersDir)) {
-            if (entry.path().extension() == ".vert" || entry.path().extension() == ".frag") {
-                totalShaderFiles++;
-            }
-        }
-    }
-    ImGui::BulletText("Total Shader Files: %d", totalShaderFiles);
-}
-
 void DebugUI::DrawInspector(Scene* activeScene) {
     if (!selectedNode && !sceneSelected) return;
 
@@ -1409,14 +1370,29 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                         ImGui::BulletText("Shader: %s", shader ? shader->GetName().c_str() : "None");
                         ImGui::BulletText("Base Color: (%.2f, %.2f, %.2f, %.2f)",
                             mat->baseColor.r, mat->baseColor.g, mat->baseColor.b, mat->baseColor.a);
-                        ImGui::BulletText("Albedo Texture: %s", mat->albedo ? "Yes" : "No");
+                        auto dropTextureSlot = [](const char* label, std::shared_ptr<Texture>& slot) {
+                            std::string buttonLabel = std::string(label) + ": " + (slot ? "Yes" : "None");
+                            ImGui::Button(buttonLabel.c_str(), ImVec2(220, 0));
+                            if (ImGui::BeginDragDropTarget()) {
+                                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(ProjectBrowser::kTexturePayloadType)) {
+                                    std::string filePath(static_cast<const char*>(payload->Data));
+                                    std::string texName = filePath;
+                                    std::replace(texName.begin(), texName.end(), '/', '_');
+                                    std::replace(texName.begin(), texName.end(), '\\', '_');
+                                    slot = ResourceManager::LoadTexture(texName, filePath);
+                                }
+                                ImGui::EndDragDropTarget();
+                            }
+                        };
+
+                        dropTextureSlot("Albedo Texture", mat->albedo);
                         if (mat->albedo) {
                             ImGui::Indent();
                             ImGui::BulletText("%dx%d", mat->albedo->GetWidth(), mat->albedo->GetHeight());
                             ImGui::Unindent();
                         }
-                        ImGui::BulletText("Normal Texture: %s", mat->normal ? "Yes" : "No");
-                        ImGui::BulletText("MetallicRoughness Texture: %s", mat->metallicRoughness ? "Yes" : "No");
+                        dropTextureSlot("Normal Texture", mat->normal);
+                        dropTextureSlot("MetallicRoughness Texture", mat->metallicRoughness);
                         ImGui::SliderFloat("Metallic##material", &mat->metallicFactor, 0.0f, 1.0f);
                         ImGui::SliderFloat("Roughness##material", &mat->roughnessFactor, 0.0f, 1.0f);
                     } else {

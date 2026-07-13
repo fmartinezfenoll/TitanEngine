@@ -26,7 +26,6 @@ public:
 private:
     static std::string DescribeNode(TNode* node);
     static void DrawSceneTree(TNode* node, Scene* activeScene, int depth = 0);
-    static void DrawResourcesTree();
     static void DrawSceneSelector(SceneManager* sceneManager);
     static void DrawInspector(Scene* activeScene);
     static void DrawDeleteConfirmation();
