@@ -1,6 +1,8 @@
 #include "Renderer/OpenGLRenderer.h"
 #include "Renderer/RendererFactory.h"
 #include "Renderer/Viewport.h"
+#include "Renderer/ShadowFramebuffer.h"
+#include "Renderer/ShadowMap.h"
 #include "ResourceManager/ResourceManager.h"
 #include "ResourceManager/OpenGLShader.h"
 #include "Scene/SceneManager.h"
@@ -10,15 +12,20 @@
 #include "Scene/LightComponent.h"
 #include "Scene/MeshComponent.h"
 #include "Renderer/GizmoRenderer.h"
+#include "Renderer/Skybox.h"
 #include "Debug/DebugUI.h"
+#include "Core/Stats.h"
+#include "Core/EngineSettings.h"
 
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <imgui.h>
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <algorithm>
 #include <iostream>
 #include <limits>
+#include <vector>
 
 // ImGui backend function declarations (headers not available, declared from backends/*.cpp)
 extern bool ImGui_ImplGlfw_InitForOpenGL(GLFWwindow* window, bool install_callbacks);
@@ -28,6 +35,10 @@ extern bool ImGui_ImplOpenGL3_Init(const char* glsl_version = nullptr);
 extern void ImGui_ImplOpenGL3_Shutdown();
 extern void ImGui_ImplOpenGL3_NewFrame();
 extern void ImGui_ImplOpenGL3_RenderDrawData(ImDrawData* draw_data);
+
+namespace {
+    constexpr unsigned int kShadowTextureUnitBase = 3; // 0-2 reserved by Material (albedo/normal/metallicRoughness)
+}
 
 void OpenGLRenderer::Register()
 {
@@ -101,11 +112,11 @@ bool OpenGLRenderer::Init(int width, int height, const std::string& appName)
          0.0f,  0.5f, 0.0f
     };
 
-    glGenVertexArrays(1, &m_VAO);
-    glGenBuffers(1, &m_VBO);
+    glGenVertexArrays(1, &VAO);
+    glGenBuffers(1, &VBO);
 
-    glBindVertexArray(m_VAO);
-    glBindBuffer(GL_ARRAY_BUFFER, m_VBO);
+    glBindVertexArray(VAO);
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
@@ -118,6 +129,7 @@ bool OpenGLRenderer::Init(int width, int height, const std::string& appName)
     ImGui_ImplOpenGL3_Init("#version 450");
 
     GizmoRenderer::Init();
+    Skybox::InitSharedGeometry();
 
     std::cout << "OpenGL Version: " << glGetString(GL_VERSION) << std::endl;
     std::cout << "Renderer: " << glGetString(GL_RENDERER) << std::endl;
@@ -128,12 +140,13 @@ bool OpenGLRenderer::Init(int width, int height, const std::string& appName)
 
 void OpenGLRenderer::Shutdown()
 {
+    Skybox::ShutdownSharedGeometry();
     GizmoRenderer::Shutdown();
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
-    glDeleteVertexArrays(1, &m_VAO);
-    glDeleteBuffers(1, &m_VBO);
+    glDeleteVertexArrays(1, &VAO);
+    glDeleteBuffers(1, &VBO);
     glfwTerminate();
 }
 
@@ -169,62 +182,266 @@ void OpenGLRenderer::UpdateCameraInput(float deltaTime)
         double mouseX, mouseY;
         glfwGetCursorPos(win, &mouseX, &mouseY);
 
-        if (m_firstMouse)
+        if (firstMouse)
         {
-            m_lastMouseX = mouseX;
-            m_lastMouseY = mouseY;
-            m_firstMouse = false;
+            lastMouseX = mouseX;
+            lastMouseY = mouseY;
+            firstMouse = false;
         }
 
-        float xOffset = static_cast<float>(mouseX - m_lastMouseX);
-        float yOffset = static_cast<float>(m_lastMouseY - mouseY);
-        m_lastMouseX = mouseX;
-        m_lastMouseY = mouseY;
+        float xOffset = static_cast<float>(mouseX - lastMouseX);
+        float yOffset = static_cast<float>(lastMouseY - mouseY);
+        lastMouseX = mouseX;
+        lastMouseY = mouseY;
 
         camera->ProcessMouseLook(xOffset, yOffset);
     }
     else
     {
         glfwSetInputMode(win, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-        m_firstMouse = true;
+        firstMouse = true;
     }
 }
 
 void OpenGLRenderer::BeginFrame()
 {
+    bool vsyncEnabled = EngineSettings::IsVSyncEnabled();
+    if (vsyncEnabled != appliedVSync) {
+        glfwSwapInterval(vsyncEnabled ? 1 : 0);
+        appliedVSync = vsyncEnabled;
+    }
+
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
     glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
-void OpenGLRenderer::Render()
+void OpenGLRenderer::ReconcileShadowFramebuffers(Scene* activeScene)
 {
-    Scene* activeScene = SceneManager::Instance().GetActiveScene();
-    if (activeScene) {
-        Frustum frustum;
-        TNode* root = activeScene->GetRoot();
-        if (root) {
-            activeScene->Draw(frustum);
+    const std::vector<TNode*>& currentLights = activeScene->GetLights();
+
+    for (auto it = shadowFramebuffers.begin(); it != shadowFramebuffers.end();) {
+        bool stillPresent = std::find(currentLights.begin(), currentLights.end(), it->first) != currentLights.end();
+        if (!stillPresent) {
+            it = shadowFramebuffers.erase(it);
+        } else {
+            ++it;
         }
-        DrawGizmos(activeScene);
-        DrawSelectionHighlight(activeScene);
-        DrawTransformGizmo(activeScene);
+    }
+
+    for (TNode* lightNode : currentLights) {
+        auto* light = lightNode->GetComponent<LightComponent>();
+        if (!light || !light->castsShadow) continue;
+
+        bool isCubemap = (light->type == LightType::Point);
+        int resolution = isCubemap ? EngineSettings::GetShadowResolutionCube()
+                                    : EngineSettings::GetShadowResolution2D();
+
+        auto it = shadowFramebuffers.find(lightNode);
+        if (it != shadowFramebuffers.end() && it->second->GetResolution() == resolution) continue;
+
+        shadowFramebuffers[lightNode] = std::make_unique<ShadowFramebuffer>(resolution, isCubemap);
     }
 }
 
-void OpenGLRenderer::DrawGizmos(Scene* activeScene)
+std::vector<ShadowMapData> OpenGLRenderer::RenderShadowPass(Scene* activeScene, const glm::vec3& cameraWorldPos)
 {
-    glm::mat4 view = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -3.0f));
-    glm::mat4 projection = glm::perspective(glm::radians(60.0f), Viewport::GetAspectRatio(), 0.1f, 100.0f);
+    std::vector<ShadowMapData> shadowMapData;
 
-    if (TNode* cameraNode = activeScene->GetMainCamera()) {
-        if (auto* camera = cameraNode->GetComponent<CameraComponent>()) {
-            view = camera->GetViewMatrix();
-            projection = camera->GetProjectionMatrix(Viewport::GetAspectRatio());
+    ReconcileShadowFramebuffers(activeScene);
+
+    TNode* root = activeScene->GetRoot();
+    if (!root) return shadowMapData;
+
+    int spotCount = 0, pointCount = 0;
+    bool directionalDone = false;
+
+    glCullFace(GL_FRONT);
+
+    for (TNode* lightNode : activeScene->GetLights()) {
+        auto* light = lightNode->GetComponent<LightComponent>();
+        if (!light || !light->castsShadow) continue;
+        if (light->type == LightType::Directional && directionalDone) continue;
+        if (light->type == LightType::Spot && spotCount >= 2) continue;
+        if (light->type == LightType::Point && pointCount >= 2) continue;
+
+        auto fbIt = shadowFramebuffers.find(lightNode);
+        if (fbIt == shadowFramebuffers.end()) continue;
+        ShadowFramebuffer* fb = fbIt->second.get();
+
+        fb->BindForWriting();
+        glClear(GL_DEPTH_BUFFER_BIT);
+
+        if (light->type == LightType::Point) {
+            auto shader = ResourceManager::LoadShader("shadow_depth_cubemap", true);
+            shader->Bind();
+            auto matrices = light->GetCubemapViewProjections();
+            for (int i = 0; i < 6; ++i)
+                shader->SetMat4("shadowMatrices[" + std::to_string(i) + "]", matrices[i]);
+            shader->SetVec3("lightPos", light->GetPosition());
+            shader->SetFloat("farPlane", light->range);
+            root->drawDepthOnly(shader.get());
+
+            ShadowMapData data;
+            data.lightNode = lightNode;
+            data.lightType = static_cast<int>(light->type);
+            data.textureId = fb->GetShadowMap().GetID();
+            data.isCubemap = true;
+            data.lightSpaceMatrix = glm::mat4(1.0f);
+            data.lightPos = light->GetPosition();
+            data.farPlane = light->range;
+            shadowMapData.push_back(data);
+        } else {
+            auto shader = ResourceManager::LoadShader("shadow_depth");
+            shader->Bind();
+            glm::vec3 focusPoint = (light->type == LightType::Directional) ? cameraWorldPos : glm::vec3(0.0f);
+            glm::mat4 lightSpaceMatrix = light->GetLightSpaceMatrix(focusPoint);
+            shader->SetMat4("lightSpaceMatrix", lightSpaceMatrix);
+            root->drawDepthOnly(shader.get());
+
+            ShadowMapData data;
+            data.lightNode = lightNode;
+            data.lightType = static_cast<int>(light->type);
+            data.textureId = fb->GetShadowMap().GetID();
+            data.isCubemap = false;
+            data.lightSpaceMatrix = lightSpaceMatrix;
+            data.lightPos = light->GetPosition();
+            data.farPlane = light->range;
+            shadowMapData.push_back(data);
         }
+
+        if (light->type == LightType::Spot) ++spotCount;
+        if (light->type == LightType::Point) ++pointCount;
+        if (light->type == LightType::Directional) directionalDone = true;
     }
 
+    glCullFace(GL_BACK);
+    ShadowFramebuffer::UnbindToScreen();
+    glViewport(0, 0, Viewport::GetWidth(), Viewport::GetHeight());
+
+    return shadowMapData;
+}
+
+void OpenGLRenderer::Render()
+{
+    Stats::BeginFrame();
+
+    Scene* activeScene = SceneManager::Instance().GetActiveScene();
+    if (activeScene) {
+        glm::mat4 view = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -3.0f));
+        glm::mat4 projection = glm::perspective(glm::radians(60.0f), Viewport::GetAspectRatio(), 0.1f, 100.0f);
+
+        glm::vec3 cameraWorldPos(0.0f);
+        if (TNode* cameraNode = activeScene->GetMainCamera()) {
+            if (auto* camera = cameraNode->GetComponent<CameraComponent>()) {
+                view = camera->GetViewMatrix();
+                projection = camera->GetProjectionMatrix(Viewport::GetAspectRatio());
+                cameraWorldPos = cameraNode->getGlobalPosition();
+            }
+        }
+
+        std::vector<ShadowMapData> shadowMapData;
+        if (EngineSettings::AreShadowsEnabled()) {
+            shadowMapData = RenderShadowPass(activeScene, cameraWorldPos);
+        }
+
+        std::vector<LightUniformData> lights;
+        for (TNode* lightNode : activeScene->GetLights()) {
+            if (auto* light = lightNode->GetComponent<LightComponent>()) {
+                LightUniformData data;
+                data.type = static_cast<int>(light->type);
+                data.position = light->GetPosition();
+                data.direction = light->GetDirection();
+                data.color = light->color;
+                data.intensity = light->intensity;
+                data.range = light->range;
+                data.innerCutoff = glm::cos(glm::radians(light->innerConeDegrees));
+                data.outerCutoff = glm::cos(glm::radians(light->outerConeDegrees));
+                data.shadowIndex = -1;
+                lights.push_back(data);
+            }
+        }
+
+        // Resolve shadowIndex per-type and build ShadowRenderData for the main pass.
+        ShadowRenderData shadowRenderData;
+        {
+            int spotSlot = 0, pointSlot = 0;
+            unsigned int nextUnit = kShadowTextureUnitBase;
+
+            size_t lightIdx = 0;
+            for (TNode* lightNode : activeScene->GetLights()) {
+                auto* light = lightNode->GetComponent<LightComponent>();
+                if (!light) continue;
+                if (lightIdx >= lights.size()) break;
+
+                if (light->castsShadow) {
+                    for (const ShadowMapData& sm : shadowMapData) {
+                        if (sm.lightNode != lightNode)
+                            continue;
+
+                        if (light->type == LightType::Directional) {
+                            lights[lightIdx].shadowIndex = 0;
+                            shadowRenderData.hasDirectional = true;
+                            shadowRenderData.directionalSlot = nextUnit;
+                            shadowRenderData.directionalLightSpaceMatrix = sm.lightSpaceMatrix;
+                            glActiveTexture(GL_TEXTURE0 + nextUnit);
+                            glBindTexture(GL_TEXTURE_2D, sm.textureId);
+                            ++nextUnit;
+                        } else if (light->type == LightType::Spot && spotSlot < 2) {
+                            lights[lightIdx].shadowIndex = spotSlot;
+                            shadowRenderData.spotSlots[spotSlot] = nextUnit;
+                            shadowRenderData.spotLightSpaceMatrices[spotSlot] = sm.lightSpaceMatrix;
+                            glActiveTexture(GL_TEXTURE0 + nextUnit);
+                            glBindTexture(GL_TEXTURE_2D, sm.textureId);
+                            ++nextUnit;
+                            ++spotSlot;
+                            shadowRenderData.spotCount = spotSlot;
+                        } else if (light->type == LightType::Point && pointSlot < 2) {
+                            lights[lightIdx].shadowIndex = pointSlot;
+                            shadowRenderData.pointSlots[pointSlot] = nextUnit;
+                            shadowRenderData.pointLightPos[pointSlot] = sm.lightPos;
+                            shadowRenderData.pointFarPlane[pointSlot] = sm.farPlane;
+                            glActiveTexture(GL_TEXTURE0 + nextUnit);
+                            glBindTexture(GL_TEXTURE_CUBE_MAP, sm.textureId);
+                            ++nextUnit;
+                            ++pointSlot;
+                            shadowRenderData.pointCount = pointSlot;
+                        }
+                        break;
+                    }
+                }
+                ++lightIdx;
+            }
+        }
+
+        Frustum frustum;
+        frustum.updateFromCamera(projection * view);
+
+        if (Skybox* skybox = activeScene->GetSkybox()) {
+            skybox->Draw(view, projection);
+        }
+
+        DrawGrid(activeScene, view, projection);
+
+        TNode* root = activeScene->GetRoot();
+        if (root) {
+            activeScene->Draw(frustum, view, projection, lights, shadowRenderData);
+        }
+        DrawGizmos(activeScene, view, projection);
+        DrawSelectionHighlight(activeScene, view, projection);
+        DrawTransformGizmo(activeScene, view, projection);
+    }
+}
+
+void OpenGLRenderer::DrawGrid(Scene* activeScene, const glm::mat4& view, const glm::mat4& projection)
+{
+    if (!activeScene->IsGridVisible()) return;
+    GizmoRenderer::DrawGrid(view, projection);
+}
+
+void OpenGLRenderer::DrawGizmos(Scene* activeScene, const glm::mat4& view, const glm::mat4& projection)
+{
     for (TNode* lightNode : activeScene->GetLights()) {
         if (auto* light = lightNode->GetComponent<LightComponent>()) {
             GizmoRenderer::DrawLightGizmo(light->GetPosition(), light->color, view, projection);
@@ -238,19 +455,10 @@ void OpenGLRenderer::DrawGizmos(Scene* activeScene)
     }
 }
 
-void OpenGLRenderer::DrawSelectionHighlight(Scene* activeScene)
+void OpenGLRenderer::DrawSelectionHighlight(Scene* activeScene, const glm::mat4& view, const glm::mat4& projection)
 {
     TNode* selected = DebugUI::GetSelectedNode();
     if (!selected) return;
-
-    glm::mat4 view = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -3.0f));
-    glm::mat4 projection = glm::perspective(glm::radians(60.0f), Viewport::GetAspectRatio(), 0.1f, 100.0f);
-    if (TNode* cameraNode = activeScene->GetMainCamera()) {
-        if (auto* camera = cameraNode->GetComponent<CameraComponent>()) {
-            view = camera->GetViewMatrix();
-            projection = camera->GetProjectionMatrix(Viewport::GetAspectRatio());
-        }
-    }
 
     if (auto* mesh = selected->GetComponent<MeshComponent>()) {
         glm::vec3 localMin, localMax;
@@ -287,31 +495,28 @@ void OpenGLRenderer::DrawSelectionHighlight(Scene* activeScene)
     }
 }
 
-void OpenGLRenderer::DrawTransformGizmo(Scene* activeScene)
+void OpenGLRenderer::DrawTransformGizmo(Scene* activeScene, const glm::mat4& view, const glm::mat4& projection)
 {
     TNode* selected = DebugUI::GetSelectedNode();
     if (!selected) return;
 
-    glm::mat4 view = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -3.0f));
-    glm::mat4 projection = glm::perspective(glm::radians(60.0f), Viewport::GetAspectRatio(), 0.1f, 100.0f);
     glm::vec3 cameraWorldPos(0.0f, 0.0f, 3.0f);
     if (TNode* cameraNode = activeScene->GetMainCamera()) {
-        if (auto* camera = cameraNode->GetComponent<CameraComponent>()) {
-            view = camera->GetViewMatrix();
-            projection = camera->GetProjectionMatrix(Viewport::GetAspectRatio());
-            cameraWorldPos = cameraNode->transform.position;
-        }
+        cameraWorldPos = cameraNode->transform.position;
     }
 
     glm::vec3 worldPos = selected->getGlobalPosition();
-    glm::mat4 baseRotation = selected->getModelMatrix();
-    baseRotation[3] = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
-    glm::vec3 scaleCol0 = glm::vec3(baseRotation[0]);
-    glm::vec3 scaleCol1 = glm::vec3(baseRotation[1]);
-    glm::vec3 scaleCol2 = glm::vec3(baseRotation[2]);
-    if (glm::length(scaleCol0) > 1e-6f) baseRotation[0] /= glm::length(scaleCol0);
-    if (glm::length(scaleCol1) > 1e-6f) baseRotation[1] /= glm::length(scaleCol1);
-    if (glm::length(scaleCol2) > 1e-6f) baseRotation[2] /= glm::length(scaleCol2);
+    glm::mat4 baseRotation = glm::mat4(1.0f);
+    if (DebugUI::GetGizmoSpace() == GizmoSpace::Local) {
+        baseRotation = selected->getModelMatrix();
+        baseRotation[3] = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+        glm::vec3 scaleCol0 = glm::vec3(baseRotation[0]);
+        glm::vec3 scaleCol1 = glm::vec3(baseRotation[1]);
+        glm::vec3 scaleCol2 = glm::vec3(baseRotation[2]);
+        if (glm::length(scaleCol0) > 1e-6f) baseRotation[0] /= glm::length(scaleCol0);
+        if (glm::length(scaleCol1) > 1e-6f) baseRotation[1] /= glm::length(scaleCol1);
+        if (glm::length(scaleCol2) > 1e-6f) baseRotation[2] /= glm::length(scaleCol2);
+    }
 
     float scale = GizmoRenderer::ComputeGizmoScale(worldPos, cameraWorldPos);
 

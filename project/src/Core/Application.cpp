@@ -14,6 +14,8 @@
 #include "Scene/LightComponent.h"
 #include "Scene/GLTFLoader.h"
 #include "Debug/DebugUI.h"
+#include "Core/Stats.h"
+#include "Core/EngineConfig.h"
 #include <glm/glm.hpp>
 #include <filesystem>
 
@@ -30,8 +32,12 @@ TNode* BuildTriangleNode() {
     auto material = std::make_shared<Material>(ResourceManager::LoadShader("basic"));
 
     TNode* node = new TNode(nullptr, "Triangle");
-    node->AddComponent<MeshComponent>(vertices, indices);
+    auto* mesh = node->AddComponent<MeshComponent>(vertices, indices);
     node->AddComponent<MaterialComponent>(material);
+
+    glm::vec3 localMin, localMax;
+    mesh->GetLocalBounds(localMin, localMax);
+    node->boundingBox = new AABB(localMin, localMax);
     return node;
 }
 
@@ -47,8 +53,35 @@ TNode* BuildSquareNode() {
     auto material = std::make_shared<Material>(ResourceManager::LoadShader("basic"));
 
     TNode* node = new TNode(nullptr, "Square");
-    node->AddComponent<MeshComponent>(vertices, indices);
+    auto* mesh = node->AddComponent<MeshComponent>(vertices, indices);
     node->AddComponent<MaterialComponent>(material);
+
+    glm::vec3 localMin, localMax;
+    mesh->GetLocalBounds(localMin, localMax);
+    node->boundingBox = new AABB(localMin, localMax);
+    return node;
+}
+
+TNode* BuildGroundPlaneNode(float size) {
+    float half = size * 0.5f;
+    std::vector<MeshVertex> vertices = {
+        { {-half, 0.0f,  half}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f} },
+        { { half, 0.0f,  half}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f} },
+        { { half, 0.0f, -half}, {0.0f, 1.0f, 0.0f}, {1.0f, 1.0f} },
+        { {-half, 0.0f, -half}, {0.0f, 1.0f, 0.0f}, {0.0f, 1.0f} },
+    };
+    std::vector<uint32_t> indices = { 0, 1, 2, 0, 2, 3 };
+
+    auto material = std::make_shared<Material>(ResourceManager::LoadShader("pbr"));
+    material->baseColor = glm::vec4(0.5f, 0.5f, 0.5f, 1.0f);
+
+    TNode* node = new TNode(nullptr, "Ground");
+    auto* mesh = node->AddComponent<MeshComponent>(vertices, indices);
+    node->AddComponent<MaterialComponent>(material);
+
+    glm::vec3 localMin, localMax;
+    mesh->GetLocalBounds(localMin, localMax);
+    node->boundingBox = new AABB(localMin, localMax);
     return node;
 }
 
@@ -57,8 +90,8 @@ TNode* BuildSquareNode() {
 // ==============================
 // Basic functions
 // ==============================
-Application::Application(const AppConfig& config)
-    : m_config(config)
+Application::Application(const AppConfig& appConfig)
+    : config(appConfig)
 {
 }
 
@@ -72,28 +105,30 @@ Application::~Application()
 // ==============================
 bool Application::Init()
 {
-    switch (m_config.API)
+    switch (config.API)
     {
         case RendererAPI::OpenGL:
-            m_renderer = RendererFactory::Instance().Create("opengl");
+            renderer = RendererFactory::Instance().Create("opengl");
             break;
 
         case RendererAPI::Vulkan:
-            m_renderer = RendererFactory::Instance().Create("vulkan");
+            renderer = RendererFactory::Instance().Create("vulkan");
             break;
     }
 
-    if (!m_renderer)
+    if (!renderer)
     {
         std::cout << "[ERROR] Renderer creation failed\n";
         return false;
     }
 
-    if (!m_renderer->Init(m_config.Width, m_config.Height, m_config.AppName))
+    if (!renderer->Init(config.Width, config.Height, config.AppName))
     {
         std::cout << "[ERROR] Renderer initialization failed\n";
         return false;
     }
+
+    EngineConfig::Load();
 
     SetupScenes();
 
@@ -106,21 +141,22 @@ void Application::Run()
 {
     double lastTime = Time::GetTime();
 
-    while (!m_renderer->ShouldClose())
+    while (!renderer->ShouldClose())
     {
         double currentTime = Time::GetTime();
         float deltaTime = static_cast<float>(currentTime - lastTime);
         lastTime = currentTime;
 
-        m_renderer->PollEvents();
-        m_renderer->Update(deltaTime);
+        renderer->PollEvents();
+        renderer->Update(deltaTime);
 
         Update(deltaTime);
+        Stats::Tick(deltaTime);
 
-        m_renderer->BeginFrame();
-        m_renderer->Render();
+        renderer->BeginFrame();
+        renderer->Render();
         OnImGui();
-        m_renderer->EndFrame();
+        renderer->EndFrame();
     }
 }
 void Application::Update(float deltaTime)
@@ -174,6 +210,7 @@ void Application::SetupScenes()
         for (TNode* node : GLTFLoader::LoadModel("resources/models/Duck.glb")) {
             duckScene->AddNodeToRoot(node);
         }
+        duckScene->AddNodeToRoot(BuildGroundPlaneNode(300.0f));
     }
 
     sm.LoadScene("Duck Scene");
@@ -184,7 +221,7 @@ void Application::SetupScenes()
             CameraComponent* camera = cameraNode->AddComponent<CameraComponent>(cameraNode);
 
             if (name == "Duck Scene") {
-                cameraNode->transform.position = glm::vec3(0.0f, 50.0f, 150.0f);
+                cameraNode->transform.position = glm::vec3(0.0f, 20.0f, 60.0f);
                 camera->farPlane = 1000.0f;
             } else {
                 cameraNode->transform.position = glm::vec3(0.0f, 0.0f, 3.0f);
@@ -195,8 +232,11 @@ void Application::SetupScenes()
 
         if (scene->GetLights().empty()) {
             TNode* lightNode = new TNode(nullptr, "DirectionalLight1");
-            lightNode->AddComponent<LightComponent>(lightNode, LightType::Directional);
+            auto* light = lightNode->AddComponent<LightComponent>(lightNode, LightType::Directional);
             lightNode->transform.rotation = glm::vec3(-50.0f, -30.0f, 0.0f);
+            if (name == "Duck Scene") {
+                light->castsShadow = true;
+            }
             scene->AddNodeToRoot(lightNode);
         }
     }
@@ -204,10 +244,11 @@ void Application::SetupScenes()
 
 void Application::Shutdown()
 {
+    EngineConfig::Save();
     DebugUI::Shutdown();
     SceneManager::Instance().UnloadAllScenes();
-    if (m_renderer)
-        m_renderer->Shutdown();
+    if (renderer)
+        renderer->Shutdown();
 }
 
 

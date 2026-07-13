@@ -1,9 +1,26 @@
 #pragma once
 
 #include "Renderer/IRenderer.h"
+#include "Scene/LightUniformData.h"
 #include <string>
+#include <memory>
+#include <unordered_map>
+#include <vector>
+#include <glm/glm.hpp>
 
 class Scene;
+class TNode;
+class ShadowFramebuffer;
+
+struct ShadowMapData {
+    TNode* lightNode;
+    int lightType;
+    unsigned int textureId;
+    bool isCubemap;
+    glm::mat4 lightSpaceMatrix;
+    glm::vec3 lightPos;
+    float farPlane;
+};
 
 class OpenGLRenderer : public IRenderer
 {
@@ -29,15 +46,23 @@ public:
 
 private:
     void* window = nullptr; // Stored as void* to avoid exposing GLFW in header
-    unsigned int m_VAO = 0;
-    unsigned int m_VBO = 0;
+    unsigned int VAO = 0;
+    unsigned int VBO = 0;
 
-    bool m_firstMouse = true;
-    double m_lastMouseX = 0.0;
-    double m_lastMouseY = 0.0;
+    bool firstMouse = true;
+    double lastMouseX = 0.0;
+    double lastMouseY = 0.0;
+
+    bool appliedVSync = true;
+
+    std::unordered_map<TNode*, std::unique_ptr<ShadowFramebuffer>> shadowFramebuffers;
 
     void UpdateCameraInput(float deltaTime);
-    void DrawGizmos(Scene* activeScene);
-    void DrawSelectionHighlight(Scene* activeScene);
-    void DrawTransformGizmo(Scene* activeScene);
+    void DrawGrid(Scene* activeScene, const glm::mat4& view, const glm::mat4& projection);
+    void DrawGizmos(Scene* activeScene, const glm::mat4& view, const glm::mat4& projection);
+    void DrawSelectionHighlight(Scene* activeScene, const glm::mat4& view, const glm::mat4& projection);
+    void DrawTransformGizmo(Scene* activeScene, const glm::mat4& view, const glm::mat4& projection);
+
+    std::vector<ShadowMapData> RenderShadowPass(Scene* activeScene, const glm::vec3& cameraWorldPos);
+    void ReconcileShadowFramebuffers(Scene* activeScene);
 };

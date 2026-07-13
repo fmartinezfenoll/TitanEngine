@@ -23,6 +23,6 @@ protected:
     virtual void SetupScenes();
 
 private:
-    AppConfig m_config;
-    std::unique_ptr<IRenderer> m_renderer;
+    AppConfig config;
+    std::unique_ptr<IRenderer> renderer;
 };

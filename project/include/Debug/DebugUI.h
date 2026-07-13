@@ -1,21 +1,24 @@
 #pragma once
 #include <string>
 #include <glm/glm.hpp>
+#include <imgui.h>
 
 class SceneManager;
 class Scene;
 class TNode;
 
 enum class GizmoMode { Move, Rotate, Scale };
-enum class GizmoHandle { None, MoveX, MoveY, MoveZ, RotateX, RotateY, RotateZ, ScaleX, ScaleY, ScaleZ };
+enum class GizmoHandle { None, MoveX, MoveY, MoveZ, RotateX, RotateY, RotateZ, ScaleX, ScaleY, ScaleZ, ScaleUniform };
+enum class GizmoSpace { Global, Local };
 
 class DebugUI {
 public:
     static void Init();
     static void Shutdown();
     static void DrawFrame(SceneManager* sceneManager);
-    static TNode* GetSelectedNode() { return m_selectedNode; }
-    static GizmoMode GetGizmoMode() { return m_gizmoMode; }
+    static TNode* GetSelectedNode() { return selectedNode; }
+    static GizmoMode GetGizmoMode() { return gizmoMode; }
+    static GizmoSpace GetGizmoSpace() { return gizmoSpace; }
 
 private:
     static std::string DescribeNode(TNode* node);
@@ -27,6 +30,8 @@ private:
     static void DrawDeleteConfirmation();
     static void DrawNodeDeleteConfirmation();
     static void DrawCameraTab(SceneManager* sceneManager);
+    static void DrawSkyboxInspector(Scene* activeScene);
+    static void SelectScene();
     static void DeleteNode(TNode* node, Scene* activeScene);
     static void DrawAddComponentMenu(TNode* node, Scene* activeScene);
     static void DrawCreateMenu(TNode* parent, Scene* activeScene);
@@ -37,23 +42,29 @@ private:
     static void UpdateGizmoDrag(Scene* activeScene);
     static void SelectNode(TNode* node);
 
-    static TNode* m_selectedNode;
-    static bool m_showDeleteConfirm;
-    static std::string m_sceneToDelete;
+    static TNode* selectedNode;
+    static bool sceneSelected;
+    static bool showDeleteConfirm;
+    static std::string sceneToDelete;
 
-    static TNode* m_nodeToDelete;
-    static bool m_showNodeDeleteConfirm;
+    static TNode* nodeToDelete;
+    static bool showNodeDeleteConfirm;
 
-    static TNode* m_renamingNode;
-    static char m_renameBuffer[256];
-    static bool m_renameJustStarted;
+    static TNode* renamingNode;
+    static char renameBuffer[256];
+    static bool renameJustStarted;
 
-    static GizmoMode m_gizmoMode;
-    static GizmoHandle m_activeHandle;
-    static glm::vec3 m_dragStartPointOnAxis;
-    static float m_dragStartAngle;
-    static glm::vec3 m_dragStartLocalPosition;
-    static glm::vec3 m_dragStartLocalRotation;
-    static glm::vec3 m_dragStartLocalScale;
-    static TNode* m_dragNode;
+    static GizmoMode gizmoMode;
+    static GizmoSpace gizmoSpace;
+    static GizmoHandle activeHandle;
+    static glm::vec3 dragStartPointOnAxis;
+    static float dragStartAngle;
+    static glm::vec3 dragStartLocalPosition;
+    static glm::vec3 dragStartLocalRotation;
+    static glm::vec3 dragStartLocalScale;
+    static TNode* dragNode;
+    static ImVec2 dragStartMousePos;
+
+    static char skyboxFolderBuffer[128];
+    static std::string skyboxLoadError;
 };

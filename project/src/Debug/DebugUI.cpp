@@ -13,6 +13,11 @@
 #include "ResourceManager/ResourceManager.h"
 #include "Renderer/GizmoRenderer.h"
 #include "Renderer/Viewport.h"
+#include "Renderer/Skybox.h"
+#include "ResourceManager/CubemapTexture.h"
+#include "Core/Stats.h"
+#include "Core/EngineSettings.h"
+#include "Core/EngineConfig.h"
 #include <imgui.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -67,7 +72,11 @@ TNode* SpawnCubeNode() {
     GetDefaultCubeMesh(vertices, indices);
 
     TNode* node = new TNode(nullptr, NextName("Cube"));
-    node->AddComponent<MeshComponent>(vertices, indices);
+    auto* mesh = node->AddComponent<MeshComponent>(vertices, indices);
+
+    glm::vec3 localMin, localMax;
+    mesh->GetLocalBounds(localMin, localMax);
+    node->boundingBox = new AABB(localMin, localMax);
 
     auto material = std::make_shared<Material>(ResourceManager::LoadShader("pbr"));
     node->AddComponent<MaterialComponent>(material);
@@ -90,32 +99,38 @@ TNode* SpawnLightNode(LightType type) {
 
 } // namespace
 
-TNode* DebugUI::m_selectedNode = nullptr;
-bool DebugUI::m_showDeleteConfirm = false;
-std::string DebugUI::m_sceneToDelete = "";
+TNode* DebugUI::selectedNode = nullptr;
+bool DebugUI::sceneSelected = false;
+bool DebugUI::showDeleteConfirm = false;
+std::string DebugUI::sceneToDelete = "";
 
-TNode* DebugUI::m_nodeToDelete = nullptr;
-bool DebugUI::m_showNodeDeleteConfirm = false;
+TNode* DebugUI::nodeToDelete = nullptr;
+bool DebugUI::showNodeDeleteConfirm = false;
 
-TNode* DebugUI::m_renamingNode = nullptr;
-char DebugUI::m_renameBuffer[256] = "";
-bool DebugUI::m_renameJustStarted = false;
+TNode* DebugUI::renamingNode = nullptr;
+char DebugUI::renameBuffer[256] = "";
+bool DebugUI::renameJustStarted = false;
 
-GizmoMode DebugUI::m_gizmoMode = GizmoMode::Move;
-GizmoHandle DebugUI::m_activeHandle = GizmoHandle::None;
-glm::vec3 DebugUI::m_dragStartPointOnAxis = glm::vec3(0.0f);
-float DebugUI::m_dragStartAngle = 0.0f;
-glm::vec3 DebugUI::m_dragStartLocalPosition = glm::vec3(0.0f);
-glm::vec3 DebugUI::m_dragStartLocalRotation = glm::vec3(0.0f);
-glm::vec3 DebugUI::m_dragStartLocalScale = glm::vec3(1.0f);
-TNode* DebugUI::m_dragNode = nullptr;
+GizmoMode DebugUI::gizmoMode = GizmoMode::Move;
+GizmoSpace DebugUI::gizmoSpace = GizmoSpace::Global;
+GizmoHandle DebugUI::activeHandle = GizmoHandle::None;
+glm::vec3 DebugUI::dragStartPointOnAxis = glm::vec3(0.0f);
+float DebugUI::dragStartAngle = 0.0f;
+glm::vec3 DebugUI::dragStartLocalPosition = glm::vec3(0.0f);
+glm::vec3 DebugUI::dragStartLocalRotation = glm::vec3(0.0f);
+glm::vec3 DebugUI::dragStartLocalScale = glm::vec3(1.0f);
+TNode* DebugUI::dragNode = nullptr;
+ImVec2 DebugUI::dragStartMousePos = ImVec2(0.0f, 0.0f);
+
+char DebugUI::skyboxFolderBuffer[128] = "";
+std::string DebugUI::skyboxLoadError = "";
 
 void DebugUI::Init() {
     // ImGui context is already created by OpenGLRenderer
 }
 
 void DebugUI::Shutdown() {
-    m_selectedNode = nullptr;
+    selectedNode = nullptr;
 }
 
 namespace {
@@ -283,22 +298,40 @@ TNode* DebugUI::PickAtCursor(Scene* activeScene) {
 }
 
 void DebugUI::SelectNode(TNode* node) {
-    m_selectedNode = node;
-    m_gizmoMode = GizmoMode::Move;
+    selectedNode = node;
+    sceneSelected = false;
+    gizmoMode = GizmoMode::Move;
+}
+
+void DebugUI::SelectScene() {
+    selectedNode = nullptr;
+    sceneSelected = true;
 }
 
 namespace {
 
 glm::vec3 WorldAxisDirection(TNode* node, int axis) {
     glm::vec3 local(axis == 0 ? 1.0f : 0.0f, axis == 1 ? 1.0f : 0.0f, axis == 2 ? 1.0f : 0.0f);
+    if (DebugUI::GetGizmoSpace() == GizmoSpace::Global) {
+        return local;
+    }
     glm::vec4 world = node->getModelMatrix() * glm::vec4(local, 0.0f);
     return glm::normalize(glm::vec3(world));
 }
 
+float SnapValue(float value, float increment) {
+    if (increment <= 0.0f) return value;
+    return std::round(value / increment) * increment;
+}
+
+constexpr float kPositionSnap = 0.5f;
+constexpr float kRotationSnapDegrees = 15.0f;
+constexpr float kScaleSnap = 0.1f;
+
 } // namespace
 
 GizmoHandle DebugUI::PickGizmoHandle(Scene* activeScene) {
-    TNode* node = m_selectedNode;
+    TNode* node = selectedNode;
     if (!node || !activeScene) return GizmoHandle::None;
 
     glm::vec3 origin, direction;
@@ -311,9 +344,22 @@ GizmoHandle DebugUI::PickGizmoHandle(Scene* activeScene) {
     float ringRadius = GizmoRenderer::kGizmoRingRadius * scale;
     float tolerance = GizmoRenderer::kGizmoPickTolerance * scale;
 
-    GizmoMode mode = m_gizmoMode;
+    GizmoMode mode = gizmoMode;
     GizmoHandle bestHandle = GizmoHandle::None;
     float bestT = std::numeric_limits<float>::max();
+
+    if (mode == GizmoMode::Scale) {
+        float centerRadius = GizmoRenderer::kGizmoCenterCubeSize * scale;
+        glm::vec3 oc = nodePos - origin;
+        float tca = glm::dot(oc, direction);
+        if (tca >= 0.0f) {
+            float d2 = glm::dot(oc, oc) - tca * tca;
+            if (d2 <= centerRadius * centerRadius) {
+                bestT = tca;
+                bestHandle = GizmoHandle::ScaleUniform;
+            }
+        }
+    }
 
     for (int axis = 0; axis < 3; ++axis) {
         glm::vec3 axisDir = WorldAxisDirection(node, axis);
@@ -354,14 +400,19 @@ GizmoHandle DebugUI::PickGizmoHandle(Scene* activeScene) {
 }
 
 void DebugUI::BeginGizmoDrag(GizmoHandle handle, Scene* activeScene) {
-    TNode* node = m_selectedNode;
+    TNode* node = selectedNode;
     if (!node || !activeScene || handle == GizmoHandle::None) return;
 
-    m_activeHandle = handle;
-    m_dragNode = node;
-    m_dragStartLocalPosition = node->transform.position;
-    m_dragStartLocalRotation = node->transform.rotation;
-    m_dragStartLocalScale = node->transform.scale;
+    activeHandle = handle;
+    dragNode = node;
+    dragStartLocalPosition = node->transform.position;
+    dragStartLocalRotation = node->transform.rotation;
+    dragStartLocalScale = node->transform.scale;
+
+    if (handle == GizmoHandle::ScaleUniform) {
+        dragStartMousePos = ImGui::GetIO().MousePos;
+        return;
+    }
 
     glm::vec3 origin, direction;
     ComputePickRay(activeScene, origin, direction);
@@ -380,7 +431,7 @@ void DebugUI::BeginGizmoDrag(GizmoHandle handle, Scene* activeScene) {
 
     if (handle == GizmoHandle::MoveX || handle == GizmoHandle::MoveY || handle == GizmoHandle::MoveZ ||
         handle == GizmoHandle::ScaleX || handle == GizmoHandle::ScaleY || handle == GizmoHandle::ScaleZ) {
-        m_dragStartPointOnAxis = ClosestPointRayToLine(origin, direction, nodePos, axisDir);
+        dragStartPointOnAxis = ClosestPointRayToLine(origin, direction, nodePos, axisDir);
     } else {
         glm::vec3 hit;
         if (RayIntersectsPlane(origin, direction, nodePos, axisDir, hit)) {
@@ -389,14 +440,30 @@ void DebugUI::BeginGizmoDrag(GizmoHandle handle, Scene* activeScene) {
             glm::vec3 arbitrary = std::abs(axisDir.x) < 0.9f ? glm::vec3(1, 0, 0) : glm::vec3(0, 1, 0);
             basisA = glm::normalize(glm::cross(axisDir, arbitrary));
             basisB = glm::cross(axisDir, basisA);
-            m_dragStartAngle = std::atan2(glm::dot(toHit, basisB), glm::dot(toHit, basisA));
+            dragStartAngle = std::atan2(glm::dot(toHit, basisB), glm::dot(toHit, basisA));
         }
     }
 }
 
 void DebugUI::UpdateGizmoDrag(Scene* activeScene) {
-    TNode* node = m_dragNode;
-    if (!node || !activeScene || m_activeHandle == GizmoHandle::None) return;
+    TNode* node = dragNode;
+    if (!node || !activeScene || activeHandle == GizmoHandle::None) return;
+
+    bool snap = ImGui::GetIO().KeyCtrl;
+
+    if (activeHandle == GizmoHandle::ScaleUniform) {
+        ImVec2 mousePos = ImGui::GetIO().MousePos;
+        float pixelDelta = mousePos.x - dragStartMousePos.x;
+
+        constexpr float kUniformScaleSensitivity = 0.01f;
+        float multiplier = 1.0f + pixelDelta * kUniformScaleSensitivity;
+        if (snap) multiplier = SnapValue(multiplier, kScaleSnap);
+
+        glm::vec3 newScale = dragStartLocalScale * multiplier;
+        newScale = glm::max(newScale, glm::vec3(0.01f));
+        node->transform.scale = newScale;
+        return;
+    }
 
     glm::vec3 origin, direction;
     ComputePickRay(activeScene, origin, direction);
@@ -406,33 +473,40 @@ void DebugUI::UpdateGizmoDrag(Scene* activeScene) {
     glm::mat4 parentModel = parent ? parent->getModelMatrix() : glm::mat4(1.0f);
     glm::mat4 parentInverse = glm::inverse(parentModel);
 
-    if (m_activeHandle == GizmoHandle::MoveX || m_activeHandle == GizmoHandle::MoveY || m_activeHandle == GizmoHandle::MoveZ) {
-        int axis = static_cast<int>(m_activeHandle) - static_cast<int>(GizmoHandle::MoveX);
+    if (activeHandle == GizmoHandle::MoveX || activeHandle == GizmoHandle::MoveY || activeHandle == GizmoHandle::MoveZ) {
+        int axis = static_cast<int>(activeHandle) - static_cast<int>(GizmoHandle::MoveX);
         glm::vec3 axisDir = WorldAxisDirection(node, axis);
 
         glm::vec3 currentPoint = ClosestPointRayToLine(origin, direction, nodePos, axisDir);
-        glm::vec3 worldDelta = currentPoint - m_dragStartPointOnAxis;
+        glm::vec3 worldDelta = currentPoint - dragStartPointOnAxis;
 
         glm::vec3 localDelta = glm::vec3(parentInverse * glm::vec4(worldDelta, 0.0f));
-        node->transform.position = m_dragStartLocalPosition + localDelta;
-    } else if (m_activeHandle == GizmoHandle::ScaleX || m_activeHandle == GizmoHandle::ScaleY || m_activeHandle == GizmoHandle::ScaleZ) {
-        int axis = static_cast<int>(m_activeHandle) - static_cast<int>(GizmoHandle::ScaleX);
+        glm::vec3 newPosition = dragStartLocalPosition + localDelta;
+        if (snap) {
+            newPosition.x = SnapValue(newPosition.x, kPositionSnap);
+            newPosition.y = SnapValue(newPosition.y, kPositionSnap);
+            newPosition.z = SnapValue(newPosition.z, kPositionSnap);
+        }
+        node->transform.position = newPosition;
+    } else if (activeHandle == GizmoHandle::ScaleX || activeHandle == GizmoHandle::ScaleY || activeHandle == GizmoHandle::ScaleZ) {
+        int axis = static_cast<int>(activeHandle) - static_cast<int>(GizmoHandle::ScaleX);
         glm::vec3 axisDir = WorldAxisDirection(node, axis);
 
         glm::vec3 currentPoint = ClosestPointRayToLine(origin, direction, nodePos, axisDir);
-        glm::vec3 worldDelta = currentPoint - m_dragStartPointOnAxis;
+        glm::vec3 worldDelta = currentPoint - dragStartPointOnAxis;
         float signedDistance = glm::dot(worldDelta, axisDir);
 
         constexpr float kScaleSensitivity = 1.0f;
         float multiplier = 1.0f + signedDistance * kScaleSensitivity;
+        if (snap) multiplier = SnapValue(multiplier, kScaleSnap);
 
-        glm::vec3 newScale = m_dragStartLocalScale;
+        glm::vec3 newScale = dragStartLocalScale;
         float* scaleAxis = &newScale.x + axis;
-        float* startAxis = &m_dragStartLocalScale.x + axis;
+        float* startAxis = &dragStartLocalScale.x + axis;
         *scaleAxis = std::max(0.01f, (*startAxis) * multiplier);
         node->transform.scale = newScale;
     } else {
-        int axis = static_cast<int>(m_activeHandle) - static_cast<int>(GizmoHandle::RotateX);
+        int axis = static_cast<int>(activeHandle) - static_cast<int>(GizmoHandle::RotateX);
         glm::vec3 axisDir = WorldAxisDirection(node, axis);
 
         glm::vec3 hit;
@@ -443,11 +517,12 @@ void DebugUI::UpdateGizmoDrag(Scene* activeScene) {
             glm::vec3 basisB = glm::cross(axisDir, basisA);
             float currentAngle = std::atan2(glm::dot(toHit, basisB), glm::dot(toHit, basisA));
 
-            float angleDelta = currentAngle - m_dragStartAngle;
+            float angleDelta = currentAngle - dragStartAngle;
 
-            glm::vec3 newRotation = m_dragStartLocalRotation;
+            glm::vec3 newRotation = dragStartLocalRotation;
             float* rotAxis = &newRotation.x + axis;
             *rotAxis += glm::degrees(angleDelta);
+            if (snap) *rotAxis = SnapValue(*rotAxis, kRotationSnapDegrees);
             node->transform.rotation = newRotation;
         }
     }
@@ -460,7 +535,7 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
     if (!activeScene) return;
 
     if (!ImGui::GetIO().WantCaptureMouse) {
-        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && m_activeHandle == GizmoHandle::None) {
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && activeHandle == GizmoHandle::None) {
             GizmoHandle handle = PickGizmoHandle(activeScene);
             if (handle != GizmoHandle::None) {
                 BeginGizmoDrag(handle, activeScene);
@@ -471,21 +546,110 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
                     ImGui::SetWindowFocus("Inspector");
                 }
             }
-        } else if (ImGui::IsMouseDown(ImGuiMouseButton_Left) && m_activeHandle != GizmoHandle::None) {
+        } else if (ImGui::IsMouseDown(ImGuiMouseButton_Left) && activeHandle != GizmoHandle::None) {
             UpdateGizmoDrag(activeScene);
         }
     }
 
-    if (ImGui::IsMouseReleased(ImGuiMouseButton_Left) && m_activeHandle != GizmoHandle::None) {
-        m_activeHandle = GizmoHandle::None;
-        m_dragNode = nullptr;
+    if (ImGui::IsMouseReleased(ImGuiMouseButton_Left) && activeHandle != GizmoHandle::None) {
+        activeHandle = GizmoHandle::None;
+        dragNode = nullptr;
     }
 
-    if (!ImGui::GetIO().WantTextInput && m_selectedNode) {
-        if (ImGui::IsKeyPressed(ImGuiKey_W)) m_gizmoMode = GizmoMode::Move;
-        if (ImGui::IsKeyPressed(ImGuiKey_E)) m_gizmoMode = GizmoMode::Rotate;
-        if (ImGui::IsKeyPressed(ImGuiKey_R)) m_gizmoMode = GizmoMode::Scale;
+    if (!ImGui::GetIO().WantTextInput) {
+        if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S)) {
+            std::filesystem::create_directories("scenes");
+            std::string fileName = "scenes/" + sceneManager->GetActiveSceneName() + ".scene";
+            SceneSerializer::SaveScene(activeScene, fileName);
+        }
+
+        if (selectedNode) {
+            if (ImGui::IsKeyPressed(ImGuiKey_W)) gizmoMode = GizmoMode::Move;
+            if (ImGui::IsKeyPressed(ImGuiKey_E)) gizmoMode = GizmoMode::Rotate;
+            if (ImGui::IsKeyPressed(ImGuiKey_R)) gizmoMode = GizmoMode::Scale;
+
+            if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D)) {
+                TNode* parent = selectedNode->parent;
+                if (parent) {
+                    TNode* duplicate = SceneSerializer::DuplicateNode(selectedNode, activeScene);
+                    if (duplicate) {
+                        parent->addChild(duplicate);
+                        SelectNode(duplicate);
+                    }
+                }
+            }
+        }
+
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            if (activeHandle != GizmoHandle::None && dragNode) {
+                dragNode->transform.position = dragStartLocalPosition;
+                dragNode->transform.rotation = dragStartLocalRotation;
+                dragNode->transform.scale = dragStartLocalScale;
+                activeHandle = GizmoHandle::None;
+                dragNode = nullptr;
+            } else {
+                SelectNode(nullptr);
+            }
+        }
     }
+
+    ImGui::SetNextWindowPos(ImVec2(10, 720), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(260, 290), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Stats", nullptr)) {
+        ImGui::Text("FPS: %.1f", Stats::GetFPS());
+        ImGui::Text("Draw calls: %d", Stats::GetDrawCalls());
+        ImGui::Separator();
+
+        bool vsyncEnabled = EngineSettings::IsVSyncEnabled();
+        if (ImGui::Checkbox("VSync", &vsyncEnabled)) {
+            EngineSettings::SetVSyncEnabled(vsyncEnabled);
+        }
+
+        bool cullingEnabled = EngineSettings::IsFrustumCullingEnabled();
+        if (ImGui::Checkbox("Frustum Culling", &cullingEnabled)) {
+            EngineSettings::SetFrustumCullingEnabled(cullingEnabled);
+        }
+
+        bool shadowsEnabled = EngineSettings::AreShadowsEnabled();
+        if (ImGui::Checkbox("Shadows", &shadowsEnabled)) {
+            EngineSettings::SetShadowsEnabled(shadowsEnabled);
+        }
+
+        if (shadowsEnabled) {
+            ImGui::Indent();
+
+            static const int kResolutions2D[] = { 512, 1024, 2048, 4096 };
+            static const char* kResolutionLabels2D[] = { "512", "1024", "2048", "4096" };
+            int current2D = EngineSettings::GetShadowResolution2D();
+            int currentIndex2D = 2;
+            for (int i = 0; i < 4; ++i) if (kResolutions2D[i] == current2D) currentIndex2D = i;
+            if (ImGui::Combo("2D Resolution", &currentIndex2D, kResolutionLabels2D, 4)) {
+                EngineSettings::SetShadowResolution2D(kResolutions2D[currentIndex2D]);
+            }
+
+            static const int kResolutionsCube[] = { 256, 512, 1024, 2048 };
+            static const char* kResolutionLabelsCube[] = { "256", "512", "1024", "2048" };
+            int currentCube = EngineSettings::GetShadowResolutionCube();
+            int currentIndexCube = 2;
+            for (int i = 0; i < 4; ++i) if (kResolutionsCube[i] == currentCube) currentIndexCube = i;
+            if (ImGui::Combo("Cube Resolution", &currentIndexCube, kResolutionLabelsCube, 4)) {
+                EngineSettings::SetShadowResolutionCube(kResolutionsCube[currentIndexCube]);
+            }
+
+            float boxSize = EngineSettings::GetDirectionalShadowBoxSize();
+            if (ImGui::DragFloat("Dir. Shadow Area", &boxSize, 1.0f, 5.0f, 500.0f)) {
+                EngineSettings::SetDirectionalShadowBoxSize(boxSize);
+            }
+            ImGui::TextDisabled("Smaller area = sharper shadows,\nbut covers less around origin");
+
+            ImGui::Unindent();
+        }
+
+        if (ImGui::Button("Save Settings")) {
+            EngineConfig::Save();
+        }
+    }
+    ImGui::End();
 
     ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(500, 700), ImGuiCond_FirstUseEver);
@@ -502,6 +666,15 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
                 ImGui::Separator();
 
                 ImGui::BeginChild("SceneTreeChild", ImVec2(0, 400), true);
+
+                ImGuiTreeNodeFlags sceneFlags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+                if (sceneSelected) sceneFlags |= ImGuiTreeNodeFlags_Selected;
+                ImGui::TreeNodeEx("Scene##sceneEntry", sceneFlags);
+                if (ImGui::IsItemClicked()) {
+                    SelectScene();
+                }
+                ImGui::Separator();
+
                 TNode* root = activeScene->GetRoot();
                 if (root) {
                     for (TNode* child : root->children) {
@@ -595,19 +768,19 @@ void DebugUI::DrawSceneTree(TNode* node, Scene* activeScene, int depth) {
 
     std::string idSuffix = "##" + std::to_string(reinterpret_cast<uintptr_t>(node));
 
-    if (m_renamingNode == node) {
-        if (m_renameJustStarted) {
+    if (renamingNode == node) {
+        if (renameJustStarted) {
             ImGui::SetKeyboardFocusHere();
-            m_renameJustStarted = false;
+            renameJustStarted = false;
         }
         ImGui::SetNextItemWidth(200);
-        bool commit = ImGui::InputText(("##rename" + idSuffix).c_str(), m_renameBuffer,
-            sizeof(m_renameBuffer), ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+        bool commit = ImGui::InputText(("##rename" + idSuffix).c_str(), renameBuffer,
+            sizeof(renameBuffer), ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
         if (commit) {
-            node->name = m_renameBuffer;
-            m_renamingNode = nullptr;
+            node->name = renameBuffer;
+            renamingNode = nullptr;
         } else if (ImGui::IsItemDeactivated()) {
-            m_renamingNode = nullptr;
+            renamingNode = nullptr;
         }
         return;
     }
@@ -618,7 +791,7 @@ void DebugUI::DrawSceneTree(TNode* node, Scene* activeScene, int depth) {
         flags |= ImGuiTreeNodeFlags_Leaf;
     }
 
-    if (node == m_selectedNode) {
+    if (node == selectedNode) {
         flags |= ImGuiTreeNodeFlags_Selected;
     }
 
@@ -636,15 +809,15 @@ void DebugUI::DrawSceneTree(TNode* node, Scene* activeScene, int depth) {
         SelectNode(node);
 
         if (ImGui::MenuItem("Rename")) {
-            m_renamingNode = node;
-            m_renameJustStarted = true;
+            renamingNode = node;
+            renameJustStarted = true;
             std::string current = node->name.empty() ? "Unnamed" : node->name;
-            std::snprintf(m_renameBuffer, sizeof(m_renameBuffer), "%s", current.c_str());
+            std::snprintf(renameBuffer, sizeof(renameBuffer), "%s", current.c_str());
         }
 
         if (ImGui::MenuItem("Delete")) {
-            m_nodeToDelete = node;
-            m_showNodeDeleteConfirm = true;
+            nodeToDelete = node;
+            showNodeDeleteConfirm = true;
         }
 
         ImGui::Separator();
@@ -663,10 +836,10 @@ void DebugUI::DrawSceneTree(TNode* node, Scene* activeScene, int depth) {
         ImGui::EndPopup();
     }
 
-    if (m_selectedNode == node && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)
+    if (selectedNode == node && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)
         && ImGui::IsKeyPressed(ImGuiKey_Delete)) {
-        m_nodeToDelete = node;
-        m_showNodeDeleteConfirm = true;
+        nodeToDelete = node;
+        showNodeDeleteConfirm = true;
     }
 
     if (opened) {
@@ -750,42 +923,68 @@ void DebugUI::DrawNodeProperties(TNode* node) {
 }
 
 void DebugUI::DrawInspector(Scene* activeScene) {
-    if (!m_selectedNode) return;
+    if (!selectedNode && !sceneSelected) return;
 
     ImGui::SetNextWindowPos(ImVec2(520, 10), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(400, 700), ImGuiCond_FirstUseEver);
 
+    if (sceneSelected) {
+        if (ImGui::Begin("Inspector", nullptr)) {
+            ImGui::Text("Scene: %s", activeScene ? "Scene properties" : "");
+            ImGui::Separator();
+            ImGui::Spacing();
+
+            if (activeScene) {
+                bool gridVisible = activeScene->IsGridVisible();
+                if (ImGui::Checkbox("Show Grid", &gridVisible)) {
+                    activeScene->SetGridVisible(gridVisible);
+                }
+            }
+
+            ImGui::Spacing();
+            DrawSkyboxInspector(activeScene);
+        }
+        ImGui::End();
+        return;
+    }
+
     if (ImGui::Begin("Inspector", nullptr)) {
-        ImGui::Text("Node: %s", m_selectedNode->name.empty() ? "Unnamed" : m_selectedNode->name.c_str());
+        ImGui::Text("Node: %s", selectedNode->name.empty() ? "Unnamed" : selectedNode->name.c_str());
         ImGui::Separator();
         ImGui::Spacing();
 
         ImGui::Text("Gizmo Mode:");
-        if (ImGui::RadioButton("Move (W)", m_gizmoMode == GizmoMode::Move)) m_gizmoMode = GizmoMode::Move;
+        if (ImGui::RadioButton("Move (W)", gizmoMode == GizmoMode::Move)) gizmoMode = GizmoMode::Move;
         ImGui::SameLine();
-        if (ImGui::RadioButton("Rotate (E)", m_gizmoMode == GizmoMode::Rotate)) m_gizmoMode = GizmoMode::Rotate;
+        if (ImGui::RadioButton("Rotate (E)", gizmoMode == GizmoMode::Rotate)) gizmoMode = GizmoMode::Rotate;
         ImGui::SameLine();
-        if (ImGui::RadioButton("Scale (R)", m_gizmoMode == GizmoMode::Scale)) m_gizmoMode = GizmoMode::Scale;
+        if (ImGui::RadioButton("Scale (R)", gizmoMode == GizmoMode::Scale)) gizmoMode = GizmoMode::Scale;
+
+        ImGui::Text("Gizmo Space:");
+        if (ImGui::RadioButton("Global", gizmoSpace == GizmoSpace::Global)) gizmoSpace = GizmoSpace::Global;
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Local", gizmoSpace == GizmoSpace::Local)) gizmoSpace = GizmoSpace::Local;
+        ImGui::TextDisabled("Hold Ctrl while dragging to snap");
 
         ImGui::Text("Transform:");
         ImGui::Separator();
-        ImGui::DragFloat3("Position##inspector", &m_selectedNode->transform.position.x, 0.1f);
-        ImGui::DragFloat3("Rotation##inspector", &m_selectedNode->transform.rotation.x, 1.0f);
-        ImGui::DragFloat3("Scale##inspector", &m_selectedNode->transform.scale.x, 0.1f);
+        ImGui::DragFloat3("Position##inspector", &selectedNode->transform.position.x, 0.1f);
+        ImGui::DragFloat3("Rotation##inspector", &selectedNode->transform.rotation.x, 1.0f);
+        ImGui::DragFloat3("Scale##inspector", &selectedNode->transform.scale.x, 0.1f);
 
         ImGui::Spacing();
-        ImGui::Text("Components: %zu", m_selectedNode->components.size());
+        ImGui::Text("Components: %zu", selectedNode->components.size());
         ImGui::Separator();
 
-        if (m_selectedNode->components.empty()) {
+        if (selectedNode->components.empty()) {
             ImGui::BulletText("No components (Group Node)");
         }
 
-        if (auto* mesh = m_selectedNode->GetComponent<MeshComponent>()) {
+        if (auto* mesh = selectedNode->GetComponent<MeshComponent>()) {
             ImGui::Text("Mesh:");
             ImGui::SameLine();
             if (ImGui::SmallButton("Remove##mesh")) {
-                m_selectedNode->RemoveComponent<MeshComponent>();
+                selectedNode->RemoveComponent<MeshComponent>();
             } else {
                 ImGui::Indent();
                 ImGui::BulletText("Vertices: %zu", mesh->GetVertexCount());
@@ -795,12 +994,12 @@ void DebugUI::DrawInspector(Scene* activeScene) {
             }
         }
 
-        if (auto* materialComp = m_selectedNode->GetComponent<MaterialComponent>()) {
+        if (auto* materialComp = selectedNode->GetComponent<MaterialComponent>()) {
             ImGui::Spacing();
             ImGui::Text("Material:");
             ImGui::SameLine();
             if (ImGui::SmallButton("Remove##material")) {
-                m_selectedNode->RemoveComponent<MaterialComponent>();
+                selectedNode->RemoveComponent<MaterialComponent>();
             } else {
                 ImGui::Indent();
                 if (const auto& mat = materialComp->material) {
@@ -823,15 +1022,15 @@ void DebugUI::DrawInspector(Scene* activeScene) {
             }
         }
 
-        if (auto* camera = m_selectedNode->GetComponent<CameraComponent>()) {
+        if (auto* camera = selectedNode->GetComponent<CameraComponent>()) {
             ImGui::Spacing();
             ImGui::Text("Camera:");
             ImGui::SameLine();
             if (ImGui::SmallButton("Remove##camera")) {
                 if (activeScene) {
-                    activeScene->UnregisterCamera(m_selectedNode);
+                    activeScene->UnregisterCamera(selectedNode);
                 }
-                m_selectedNode->RemoveComponent<CameraComponent>();
+                selectedNode->RemoveComponent<CameraComponent>();
             } else {
                 ImGui::Indent();
                 ImGui::BulletText("FOV: %.1f", camera->fov);
@@ -841,7 +1040,7 @@ void DebugUI::DrawInspector(Scene* activeScene) {
             }
         }
 
-        if (auto* light = m_selectedNode->GetComponent<LightComponent>()) {
+        if (auto* light = selectedNode->GetComponent<LightComponent>()) {
             const char* typeName = light->type == LightType::Directional ? "Directional"
                                   : light->type == LightType::Point ? "Point" : "Spot";
 
@@ -850,9 +1049,9 @@ void DebugUI::DrawInspector(Scene* activeScene) {
             ImGui::SameLine();
             if (ImGui::SmallButton("Remove##light")) {
                 if (activeScene) {
-                    activeScene->UnregisterLight(m_selectedNode);
+                    activeScene->UnregisterLight(selectedNode);
                 }
-                m_selectedNode->RemoveComponent<LightComponent>();
+                selectedNode->RemoveComponent<LightComponent>();
             } else {
                 ImGui::Indent();
                 ImGui::ColorEdit3("Color##light", &light->color.x);
@@ -864,6 +1063,7 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                     ImGui::DragFloat("Inner Cone##light", &light->innerConeDegrees, 0.5f, 0.0f, light->outerConeDegrees - 0.1f);
                     ImGui::DragFloat("Outer Cone##light", &light->outerConeDegrees, 0.5f, light->innerConeDegrees + 0.1f, 89.0f);
                 }
+                ImGui::Checkbox("Casts Shadow##light", &light->castsShadow);
                 ImGui::Unindent();
             }
         }
@@ -871,11 +1071,11 @@ void DebugUI::DrawInspector(Scene* activeScene) {
         ImGui::Spacing();
         ImGui::Text("Hierarchy:");
         ImGui::Separator();
-        ImGui::BulletText("Parent: %s", m_selectedNode->parent ? (m_selectedNode->parent->name.empty() ? "Root" : m_selectedNode->parent->name.c_str()) : "None");
-        ImGui::BulletText("Children: %zu", m_selectedNode->children.size());
-        if (!m_selectedNode->children.empty()) {
+        ImGui::BulletText("Parent: %s", selectedNode->parent ? (selectedNode->parent->name.empty() ? "Root" : selectedNode->parent->name.c_str()) : "None");
+        ImGui::BulletText("Children: %zu", selectedNode->children.size());
+        if (!selectedNode->children.empty()) {
             ImGui::Indent();
-            for (TNode* child : m_selectedNode->children) {
+            for (TNode* child : selectedNode->children) {
                 ImGui::BulletText("%s", child->name.empty() ? "Unnamed" : child->name.c_str());
             }
             ImGui::Unindent();
@@ -883,15 +1083,15 @@ void DebugUI::DrawInspector(Scene* activeScene) {
 
         ImGui::Spacing();
         ImGui::Text("Global Position: (%.2f, %.2f, %.2f)",
-            m_selectedNode->getGlobalPosition().x,
-            m_selectedNode->getGlobalPosition().y,
-            m_selectedNode->getGlobalPosition().z);
+            selectedNode->getGlobalPosition().x,
+            selectedNode->getGlobalPosition().y,
+            selectedNode->getGlobalPosition().z);
     }
     ImGui::End();
 }
 
 void DebugUI::DrawDeleteConfirmation() {
-    if (!m_showDeleteConfirm) return;
+    if (!showDeleteConfirm) return;
 
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
@@ -899,7 +1099,7 @@ void DebugUI::DrawDeleteConfirmation() {
 
     bool open = true;
     if (ImGui::Begin("Delete Scene?", &open, ImGuiWindowFlags_Modal | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextWrapped("Are you sure you want to delete:\n\n\"%s\"\n\nThis action cannot be undone.", m_sceneToDelete.c_str());
+        ImGui::TextWrapped("Are you sure you want to delete:\n\n\"%s\"\n\nThis action cannot be undone.", sceneToDelete.c_str());
         ImGui::Spacing();
         ImGui::Separator();
         ImGui::Spacing();
@@ -910,23 +1110,23 @@ void DebugUI::DrawDeleteConfirmation() {
         ImGui::SetCursorPosX((ImGui::GetWindowSize().x - totalWidth) * 0.5f);
 
         if (ImGui::Button("Delete Forever", ImVec2(buttonWidth, 0))) {
-            SceneManager::Instance().UnloadScene(m_sceneToDelete);
-            m_sceneToDelete = "";
-            m_showDeleteConfirm = false;
+            SceneManager::Instance().UnloadScene(sceneToDelete);
+            sceneToDelete = "";
+            showDeleteConfirm = false;
         }
 
         ImGui::SameLine();
 
         if (ImGui::Button("Cancel", ImVec2(buttonWidth, 0))) {
-            m_showDeleteConfirm = false;
-            m_sceneToDelete = "";
+            showDeleteConfirm = false;
+            sceneToDelete = "";
         }
 
         ImGui::End();
     }
 
     if (!open) {
-        m_showDeleteConfirm = false;
+        showDeleteConfirm = false;
     }
 }
 
@@ -951,11 +1151,11 @@ void DebugUI::DeleteNode(TNode* node, Scene* activeScene) {
         }
     }
 
-    if (m_selectedNode == node) {
-        m_selectedNode = nullptr;
+    if (selectedNode == node) {
+        selectedNode = nullptr;
     }
-    if (m_renamingNode == node) {
-        m_renamingNode = nullptr;
+    if (renamingNode == node) {
+        renamingNode = nullptr;
     }
 
     node->removeFromParent();
@@ -970,7 +1170,13 @@ void DebugUI::DrawAddComponentMenu(TNode* node, Scene* activeScene) {
             std::vector<MeshVertex> vertices;
             std::vector<uint32_t> indices;
             GetDefaultCubeMesh(vertices, indices);
-            node->AddComponent<MeshComponent>(vertices, indices);
+            auto* mesh = node->AddComponent<MeshComponent>(vertices, indices);
+
+            if (!node->boundingBox) {
+                glm::vec3 localMin, localMax;
+                mesh->GetLocalBounds(localMin, localMax);
+                node->boundingBox = new AABB(localMin, localMax);
+            }
 
             if (!node->GetComponent<MaterialComponent>()) {
                 auto material = std::make_shared<Material>(ResourceManager::LoadShader("pbr"));
@@ -1050,13 +1256,13 @@ void DebugUI::DrawCreateMenu(TNode* parent, Scene* activeScene) {
 }
 
 void DebugUI::DrawNodeDeleteConfirmation() {
-    if (!m_showNodeDeleteConfirm || !m_nodeToDelete) return;
+    if (!showNodeDeleteConfirm || !nodeToDelete) return;
 
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSize(ImVec2(400, -1), ImGuiCond_FirstUseEver);
 
-    std::string nodeName = m_nodeToDelete->name.empty() ? "Unnamed" : m_nodeToDelete->name;
+    std::string nodeName = nodeToDelete->name.empty() ? "Unnamed" : nodeToDelete->name;
 
     bool open = true;
     if (ImGui::Begin("Delete Node?", &open, ImGuiWindowFlags_Modal | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize)) {
@@ -1071,24 +1277,24 @@ void DebugUI::DrawNodeDeleteConfirmation() {
         ImGui::SetCursorPosX((ImGui::GetWindowSize().x - totalWidth) * 0.5f);
 
         if (ImGui::Button("Delete Forever##node", ImVec2(buttonWidth, 0))) {
-            DeleteNode(m_nodeToDelete, SceneManager::Instance().GetActiveScene());
-            m_nodeToDelete = nullptr;
-            m_showNodeDeleteConfirm = false;
+            DeleteNode(nodeToDelete, SceneManager::Instance().GetActiveScene());
+            nodeToDelete = nullptr;
+            showNodeDeleteConfirm = false;
         }
 
         ImGui::SameLine();
 
         if (ImGui::Button("Cancel##node", ImVec2(buttonWidth, 0))) {
-            m_nodeToDelete = nullptr;
-            m_showNodeDeleteConfirm = false;
+            nodeToDelete = nullptr;
+            showNodeDeleteConfirm = false;
         }
 
         ImGui::End();
     }
 
     if (!open) {
-        m_nodeToDelete = nullptr;
-        m_showNodeDeleteConfirm = false;
+        nodeToDelete = nullptr;
+        showNodeDeleteConfirm = false;
     }
 }
 
@@ -1160,6 +1366,54 @@ void DebugUI::DrawCameraTab(SceneManager* sceneManager) {
     ImGui::Text("Forward: (%.2f, %.2f, %.2f)", forward.x, forward.y, forward.z);
 }
 
+void DebugUI::DrawSkyboxInspector(Scene* activeScene) {
+    if (!activeScene) return;
+
+    ImGui::Text("Skybox:");
+
+    Skybox* skybox = activeScene->GetSkybox();
+    if (skybox) {
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Remove##skybox")) {
+            activeScene->SetSkybox(nullptr);
+        }
+        ImGui::Indent();
+        ImGui::BulletText("Folder: %s", skybox->GetName().c_str());
+        ImGui::Unindent();
+    } else {
+        ImGui::Indent();
+        ImGui::BulletText("None");
+        ImGui::Unindent();
+    }
+
+    ImGui::Spacing();
+    ImGui::Indent();
+    ImGui::TextWrapped(
+        "Folder under resources/textures/skybox/ containing "
+        "right/left/top/bottom/front/back.jpg or .png");
+    ImGui::InputText("Folder##skybox", skyboxFolderBuffer, sizeof(skyboxFolderBuffer));
+
+    if (ImGui::Button("Load Skybox")) {
+        std::string folder = skyboxFolderBuffer;
+        if (folder.empty()) {
+            skyboxLoadError = "Folder name is empty.";
+        } else {
+            auto cubemap = ResourceManager::LoadSkyboxFromFolder(folder);
+            if (cubemap) {
+                activeScene->SetSkybox(std::make_shared<Skybox>(cubemap, folder));
+                skyboxLoadError.clear();
+            } else {
+                skyboxLoadError = "Failed to load skybox '" + folder + "' (check console for missing faces).";
+            }
+        }
+    }
+
+    if (!skyboxLoadError.empty()) {
+        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", skyboxLoadError.c_str());
+    }
+    ImGui::Unindent();
+}
+
 void DebugUI::DrawSceneSelector(SceneManager* sceneManager) {
     if (!sceneManager) return;
 
@@ -1200,8 +1454,8 @@ void DebugUI::DrawSceneSelector(SceneManager* sceneManager) {
     ImGui::SameLine();
     if (ImGui::Button("Delete##btn")) {
         if (sceneManager->GetActiveScene()) {
-            m_sceneToDelete = sceneManager->GetActiveSceneName();
-            m_showDeleteConfirm = true;
+            sceneToDelete = sceneManager->GetActiveSceneName();
+            showDeleteConfirm = true;
             ImGui::OpenPopup("Delete Scene Confirmation");
         }
     }
