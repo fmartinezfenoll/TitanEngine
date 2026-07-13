@@ -20,7 +20,8 @@ public:
 
     void Update(float deltaTime);
     void Draw(const Frustum& frustum, const glm::mat4& view, const glm::mat4& projection,
-              const std::vector<LightUniformData>& lightUniforms, const ShadowRenderData& shadowData);
+              const glm::vec3& cameraWorldPos, const std::vector<LightUniformData>& lightUniforms,
+              const ShadowRenderData& shadowData, const IBLRenderData& iblData);
 
     void Clear();
 
@@ -41,6 +42,9 @@ public:
     bool IsGridVisible() const { return showGrid; }
     void SetGridVisible(bool visible) { showGrid = visible; }
 
+    const glm::vec3& GetClearColor() const { return clearColor; }
+    void SetClearColor(const glm::vec3& color) { clearColor = color; }
+
 private:
     TNode* root = nullptr;
     std::vector<TNode*> cameras;
@@ -48,4 +52,5 @@ private:
     std::vector<TNode*> lights;
     std::shared_ptr<Skybox> skybox;
     bool showGrid = true;
+    glm::vec3 clearColor{0.1f, 0.1f, 0.15f};
 };

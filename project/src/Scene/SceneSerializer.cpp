@@ -9,6 +9,8 @@
 #include "ResourceManager/Material.h"
 #include "ResourceManager/OpenGLShader.h"
 #include "ResourceManager/Texture.h"
+#include "ResourceManager/CubemapTexture.h"
+#include "Renderer/Skybox.h"
 #include "Core/Log.h"
 #include <json.hpp>
 #include <fstream>
@@ -130,6 +132,8 @@ json SerializeComponents(const TNode* node) {
             auto shader = mat->GetShader();
             j["shader"] = shader ? shader->GetName() : "";
             j["baseColor"] = {mat->baseColor.r, mat->baseColor.g, mat->baseColor.b, mat->baseColor.a};
+            j["metallicFactor"] = mat->metallicFactor;
+            j["roughnessFactor"] = mat->roughnessFactor;
 
             auto serializeTextureSlot = [&](const char* key, const std::shared_ptr<Texture>& tex) {
                 if (!tex) return;
@@ -212,6 +216,8 @@ void DeserializeComponents(TNode* node, Scene* scene, const json& j) {
                 auto c = compJson["baseColor"];
                 material->baseColor = {c[0], c[1], c[2], c[3]};
             }
+            if (compJson.contains("metallicFactor")) material->metallicFactor = compJson["metallicFactor"];
+            if (compJson.contains("roughnessFactor")) material->roughnessFactor = compJson["roughnessFactor"];
 
             auto deserializeTextureSlot = [&](const char* key, std::shared_ptr<Texture>& slot) {
                 if (!compJson.contains(key)) return;
@@ -273,6 +279,14 @@ json SerializeNode(const TNode* node) {
     // Serialize transform
     j["transform"] = SerializeTransform(node->transform);
 
+    if (!node->visible) {
+        j["visible"] = false;
+    }
+
+    if (node->locked) {
+        j["locked"] = true;
+    }
+
     // Serialize bounding volume
     if (node->boundingBox) {
         j["boundingBox"] = SerializeBoundingVolume(node->boundingBox);
@@ -314,6 +328,14 @@ TNode* DeserializeNode(const json& j, Scene* scene) {
         node->transform = DeserializeTransform(j["transform"]);
     }
 
+    if (j.contains("visible")) {
+        node->visible = j["visible"];
+    }
+
+    if (j.contains("locked")) {
+        node->locked = j["locked"];
+    }
+
     // Deserialize components
     if (j.contains("components")) {
         DeserializeComponents(node, scene, j["components"]);
@@ -343,6 +365,16 @@ bool SceneSerializer::SaveScene(Scene* scene, const std::string& filePath) {
     try {
         json j;
         j["version"] = 1;
+
+        j["showGrid"] = scene->IsGridVisible();
+        const glm::vec3& clearColor = scene->GetClearColor();
+        j["clearColor"] = {clearColor.r, clearColor.g, clearColor.b};
+
+        if (Skybox* skybox = scene->GetSkybox()) {
+            if (!skybox->GetName().empty()) {
+                j["skybox"] = skybox->GetName();
+            }
+        }
 
         TNode* root = scene->GetRoot();
         if (root) {
@@ -380,6 +412,23 @@ Scene* SceneSerializer::LoadScene(const std::string& filePath) {
 
         Scene* scene = new Scene();
         scene->Init();
+
+        if (j.contains("showGrid")) {
+            scene->SetGridVisible(j["showGrid"]);
+        }
+        if (j.contains("clearColor") && j["clearColor"].is_array()) {
+            auto c = j["clearColor"];
+            scene->SetClearColor(glm::vec3(c[0], c[1], c[2]));
+        }
+        if (j.contains("skybox")) {
+            std::string skyboxFolder = j["skybox"];
+            auto cubemap = ResourceManager::LoadSkyboxFromFolder(skyboxFolder);
+            if (cubemap) {
+                scene->SetSkybox(std::make_shared<Skybox>(cubemap, skyboxFolder));
+            } else {
+                Log::Error("SceneSerializer: failed to reload skybox '" + skyboxFolder + "'");
+            }
+        }
 
         if (j.contains("root")) {
             TNode* root = DeserializeNode(j["root"], scene);

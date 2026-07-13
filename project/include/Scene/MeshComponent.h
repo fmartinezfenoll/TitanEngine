@@ -25,9 +25,9 @@ public:
     MeshComponent& operator=(const MeshComponent&) = delete;
 
     void Draw(const glm::mat4& modelMatrix, MaterialComponent* material,
-              const glm::mat4& view, const glm::mat4& projection,
+              const glm::mat4& view, const glm::mat4& projection, const glm::vec3& cameraWorldPos,
               const std::vector<LightUniformData>& lights,
-              const ShadowRenderData& shadowData) const;
+              const ShadowRenderData& shadowData, const IBLRenderData& iblData) const;
 
     void DrawDepthOnly(const glm::mat4& modelMatrix, OpenGLShader* depthShader) const;
 
@@ -41,6 +41,11 @@ public:
         outMin = LocalMin;
         outMax = LocalMax;
     }
+
+    // Shifts all vertices so the local bounding-box center becomes (0,0,0),
+    // re-uploads the VBO, and returns the shift applied (world-space, at scale 1)
+    // so the caller can compensate the owning node's transform.position.
+    glm::vec3 RecenterPivot();
 
 private:
     unsigned int VAO = 0;

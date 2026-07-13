@@ -143,6 +143,8 @@ public:
     Transform transform;
     BoundingVolume* boundingBox = nullptr;
     std::string name;
+    bool visible = true;
+    bool locked = false;
 
     TNode(BoundingVolume* boundingBox = nullptr, const std::string& nodeName = "")
         : boundingBox(boundingBox), name(nodeName) {}
@@ -215,7 +217,8 @@ public:
     }
 
     void draw(const Frustum& frustum, const glm::mat4& view, const glm::mat4& projection,
-              const std::vector<LightUniformData>& lights, const ShadowRenderData& shadowData,
+              const glm::vec3& cameraWorldPos, const std::vector<LightUniformData>& lights,
+              const ShadowRenderData& shadowData, const IBLRenderData& iblData,
               const glm::mat4& parentMatrix = glm::mat4(1.0f));
 
     void drawDepthOnly(OpenGLShader* depthShader, const glm::mat4& parentMatrix = glm::mat4(1.0f));

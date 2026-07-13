@@ -59,6 +59,10 @@ void EngineConfig::Load(const std::string& path)
     if (it != values.end())
         EngineSettings::SetShadowsEnabled(ToBool(it->second, EngineSettings::AreShadowsEnabled()));
 
+    it = values.find("IBL");
+    if (it != values.end())
+        EngineSettings::SetIBLEnabled(ToBool(it->second, EngineSettings::IsIBLEnabled()));
+
     it = values.find("ShadowResolution2D");
     if (it != values.end())
         EngineSettings::SetShadowResolution2D(std::stoi(it->second));
@@ -70,6 +74,18 @@ void EngineConfig::Load(const std::string& path)
     it = values.find("DirectionalShadowBoxSize");
     if (it != values.end())
         EngineSettings::SetDirectionalShadowBoxSize(std::stof(it->second));
+
+    it = values.find("PositionSnap");
+    if (it != values.end())
+        EngineSettings::SetPositionSnap(std::stof(it->second));
+
+    it = values.find("RotationSnapDegrees");
+    if (it != values.end())
+        EngineSettings::SetRotationSnapDegrees(std::stof(it->second));
+
+    it = values.find("ScaleSnap");
+    if (it != values.end())
+        EngineSettings::SetScaleSnap(std::stof(it->second));
 
     Log::Info("Loaded engine settings from " + path);
 }
@@ -86,7 +102,11 @@ void EngineConfig::Save(const std::string& path)
     file << "VSync=" << (EngineSettings::IsVSyncEnabled() ? 1 : 0) << "\n";
     file << "FrustumCulling=" << (EngineSettings::IsFrustumCullingEnabled() ? 1 : 0) << "\n";
     file << "Shadows=" << (EngineSettings::AreShadowsEnabled() ? 1 : 0) << "\n";
+    file << "IBL=" << (EngineSettings::IsIBLEnabled() ? 1 : 0) << "\n";
     file << "ShadowResolution2D=" << EngineSettings::GetShadowResolution2D() << "\n";
     file << "ShadowResolutionCube=" << EngineSettings::GetShadowResolutionCube() << "\n";
     file << "DirectionalShadowBoxSize=" << EngineSettings::GetDirectionalShadowBoxSize() << "\n";
+    file << "PositionSnap=" << EngineSettings::GetPositionSnap() << "\n";
+    file << "RotationSnapDegrees=" << EngineSettings::GetRotationSnapDegrees() << "\n";
+    file << "ScaleSnap=" << EngineSettings::GetScaleSnap() << "\n";
 }

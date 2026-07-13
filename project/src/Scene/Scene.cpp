@@ -43,9 +43,10 @@ void Scene::Update(float deltaTime) {
 }
 
 void Scene::Draw(const Frustum& frustum, const glm::mat4& view, const glm::mat4& projection,
-                 const std::vector<LightUniformData>& lightUniforms, const ShadowRenderData& shadowData) {
+                 const glm::vec3& cameraWorldPos, const std::vector<LightUniformData>& lightUniforms,
+                 const ShadowRenderData& shadowData, const IBLRenderData& iblData) {
     if (root) {
-        root->draw(frustum, view, projection, lightUniforms, shadowData);
+        root->draw(frustum, view, projection, cameraWorldPos, lightUniforms, shadowData, iblData);
     }
 }
 

@@ -37,21 +37,23 @@ void Frustum::updateFromCamera(const glm::mat4& vp) {
 }
 
 void TNode::draw(const Frustum& frustum, const glm::mat4& view, const glm::mat4& projection,
-                 const std::vector<LightUniformData>& lights, const ShadowRenderData& shadowData,
-                 const glm::mat4& parentMatrix) {
+                 const glm::vec3& cameraWorldPos, const std::vector<LightUniformData>& lights,
+                 const ShadowRenderData& shadowData, const IBLRenderData& iblData, const glm::mat4& parentMatrix) {
     glm::mat4 modelMatrix = parentMatrix * transform.getModelMatrix();
 
     bool passesCulling = !EngineSettings::IsFrustumCullingEnabled()
         || !boundingBox || boundingBox->isOnFrustum(frustum, modelMatrix);
 
     if (passesCulling) {
-        if (auto* mesh = GetComponent<MeshComponent>()) {
-            mesh->Draw(modelMatrix, GetComponent<MaterialComponent>(), view, projection, lights, shadowData);
+        if (visible) {
+            if (auto* mesh = GetComponent<MeshComponent>()) {
+                mesh->Draw(modelMatrix, GetComponent<MaterialComponent>(), view, projection, cameraWorldPos, lights, shadowData, iblData);
+            }
         }
 
         for (TNode* child : children) {
             if (child) {
-                child->draw(frustum, view, projection, lights, shadowData, modelMatrix);
+                child->draw(frustum, view, projection, cameraWorldPos, lights, shadowData, iblData, modelMatrix);
             }
         }
     }
@@ -60,8 +62,10 @@ void TNode::draw(const Frustum& frustum, const glm::mat4& view, const glm::mat4&
 void TNode::drawDepthOnly(OpenGLShader* depthShader, const glm::mat4& parentMatrix) {
     glm::mat4 modelMatrix = parentMatrix * transform.getModelMatrix();
 
-    if (auto* mesh = GetComponent<MeshComponent>()) {
-        mesh->DrawDepthOnly(modelMatrix, depthShader);
+    if (visible) {
+        if (auto* mesh = GetComponent<MeshComponent>()) {
+            mesh->DrawDepthOnly(modelMatrix, depthShader);
+        }
     }
 
     for (TNode* child : children) {

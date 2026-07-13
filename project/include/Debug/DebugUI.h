@@ -1,7 +1,9 @@
 #pragma once
 #include <string>
+#include <vector>
 #include <glm/glm.hpp>
 #include <imgui.h>
+#include "Scene/TNode.h"
 
 class SceneManager;
 class Scene;
@@ -29,6 +31,7 @@ private:
     static void DrawInspector(Scene* activeScene);
     static void DrawDeleteConfirmation();
     static void DrawNodeDeleteConfirmation();
+    static void DrawSaveConfirmation();
     static void DrawCameraTab(SceneManager* sceneManager);
     static void DrawSkyboxInspector(Scene* activeScene);
     static void SelectScene();
@@ -41,6 +44,10 @@ private:
     static void BeginGizmoDrag(GizmoHandle handle, Scene* activeScene);
     static void UpdateGizmoDrag(Scene* activeScene);
     static void SelectNode(TNode* node);
+    static void FocusOnSelected(Scene* activeScene);
+    static void ToggleNodeInMultiSelect(TNode* node);
+    static bool IsMultiSelected(TNode* node);
+    static void DrawMultiDeleteConfirmation();
 
     static TNode* selectedNode;
     static bool sceneSelected;
@@ -49,6 +56,12 @@ private:
 
     static TNode* nodeToDelete;
     static bool showNodeDeleteConfirm;
+
+    static std::vector<TNode*> multiSelectedNodes;
+    static bool showMultiDeleteConfirm;
+
+    static bool showSaveConfirm;
+    static std::string sceneToSave;
 
     static TNode* renamingNode;
     static char renameBuffer[256];
@@ -67,4 +80,11 @@ private:
 
     static char skyboxFolderBuffer[128];
     static std::string skyboxLoadError;
+
+    static char sceneTreeFilter[128];
+    static bool NodeMatchesFilter(TNode* node, const std::string& filter);
+
+    static bool hasCopiedTransform;
+    static Transform copiedTransform;
+    static bool uniformScaleLock;
 };

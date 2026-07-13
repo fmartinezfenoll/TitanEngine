@@ -92,6 +92,23 @@ MeshComponent::MeshComponent(const std::vector<MeshVertex>& vertices,
     glBindVertexArray(0);
 }
 
+glm::vec3 MeshComponent::RecenterPivot() {
+    glm::vec3 center = (LocalMin + LocalMax) * 0.5f;
+    if (center == glm::vec3(0.0f)) return glm::vec3(0.0f);
+
+    for (MeshVertex& v : Vertices) {
+        v.position -= center;
+    }
+    LocalMin -= center;
+    LocalMax -= center;
+
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, Vertices.size() * sizeof(MeshVertex), Vertices.data());
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+    return center;
+}
+
 MeshComponent::~MeshComponent() {
     glDeleteVertexArrays(1, &VAO);
     glDeleteBuffers(1, &VBO);
@@ -99,9 +116,9 @@ MeshComponent::~MeshComponent() {
 }
 
 void MeshComponent::Draw(const glm::mat4& modelMatrix, MaterialComponent* material,
-                         const glm::mat4& view, const glm::mat4& projection,
+                         const glm::mat4& view, const glm::mat4& projection, const glm::vec3& cameraWorldPos,
                          const std::vector<LightUniformData>& lights,
-                         const ShadowRenderData& shadowData) const {
+                         const ShadowRenderData& shadowData, const IBLRenderData& iblData) const {
     if (!material || !material->material) return;
 
     auto shader = material->material->GetShader();
@@ -111,6 +128,7 @@ void MeshComponent::Draw(const glm::mat4& modelMatrix, MaterialComponent* materi
     shader->SetMat4("projection", projection);
     shader->SetMat4("view", view);
     shader->SetMat4("model", modelMatrix);
+    shader->SetVec3("cameraWorldPos", cameraWorldPos);
 
     int lightCount = std::min(static_cast<int>(lights.size()), kMaxLights);
     for (int i = 0; i < lightCount; ++i)
@@ -148,6 +166,13 @@ void MeshComponent::Draw(const glm::mat4& modelMatrix, MaterialComponent* materi
         shader->SetInt("pointShadowMaps" + idx, static_cast<int>(shadowData.pointSlots[i]));
         shader->SetVec3("pointShadowLightPos" + idx, shadowData.pointLightPos[i]);
         shader->SetFloat("pointShadowFarPlane" + idx, shadowData.pointFarPlane[i]);
+    }
+
+    shader->SetBool("hasIBL", iblData.hasIBL);
+    if (iblData.hasIBL) {
+        shader->SetInt("irradianceMap", static_cast<int>(iblData.irradianceSlot));
+        shader->SetInt("prefilterMap", static_cast<int>(iblData.prefilterSlot));
+        shader->SetInt("brdfLUT", static_cast<int>(iblData.brdfLUTSlot));
     }
 
     glBindVertexArray(VAO);

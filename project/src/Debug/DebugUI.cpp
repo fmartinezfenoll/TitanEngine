@@ -27,7 +27,9 @@
 #include <unordered_map>
 #include <limits>
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <cstdlib>
 
 namespace {
 
@@ -64,6 +66,32 @@ void GetDefaultCubeMesh(std::vector<MeshVertex>& vertices, std::vector<uint32_t>
 std::string NextName(const std::string& base) {
     static std::unordered_map<std::string, int> counters;
     return base + std::to_string(++counters[base]);
+}
+
+// Spawn point in front of the active camera, with a small random jitter so
+// repeated creates don't stack exactly on top of each other.
+glm::vec3 ComputeSpawnWorldPosition(Scene* activeScene) {
+    constexpr float kSpawnDistance = 5.0f;
+    constexpr float kJitterRange = 0.5f;
+
+    glm::vec3 basePos(0.0f, 0.0f, 0.0f);
+    glm::vec3 forward(0.0f, 0.0f, -1.0f);
+
+    if (activeScene) {
+        if (TNode* cameraNode = activeScene->GetMainCamera()) {
+            if (auto* camera = cameraNode->GetComponent<CameraComponent>()) {
+                basePos = cameraNode->transform.position;
+                forward = camera->GetForward();
+            }
+        }
+    }
+
+    glm::vec3 jitter(
+        ((std::rand() % 1000) / 1000.0f - 0.5f) * 2.0f * kJitterRange,
+        ((std::rand() % 1000) / 1000.0f - 0.5f) * 2.0f * kJitterRange,
+        ((std::rand() % 1000) / 1000.0f - 0.5f) * 2.0f * kJitterRange);
+
+    return basePos + forward * kSpawnDistance + jitter;
 }
 
 TNode* SpawnCubeNode() {
@@ -107,6 +135,12 @@ std::string DebugUI::sceneToDelete = "";
 TNode* DebugUI::nodeToDelete = nullptr;
 bool DebugUI::showNodeDeleteConfirm = false;
 
+std::vector<TNode*> DebugUI::multiSelectedNodes;
+bool DebugUI::showMultiDeleteConfirm = false;
+
+bool DebugUI::showSaveConfirm = false;
+std::string DebugUI::sceneToSave = "";
+
 TNode* DebugUI::renamingNode = nullptr;
 char DebugUI::renameBuffer[256] = "";
 bool DebugUI::renameJustStarted = false;
@@ -124,6 +158,12 @@ ImVec2 DebugUI::dragStartMousePos = ImVec2(0.0f, 0.0f);
 
 char DebugUI::skyboxFolderBuffer[128] = "";
 std::string DebugUI::skyboxLoadError = "";
+
+char DebugUI::sceneTreeFilter[128] = "";
+
+bool DebugUI::hasCopiedTransform = false;
+Transform DebugUI::copiedTransform = Transform();
+bool DebugUI::uniformScaleLock = false;
 
 void DebugUI::Init() {
     // ImGui context is already created by OpenGLRenderer
@@ -197,7 +237,8 @@ void WalkMeshCandidates(TNode* node, const glm::vec3& origin, const glm::vec3& d
                         TNode*& closestNode, float& closestT) {
     if (!node) return;
 
-    if (auto* mesh = node->GetComponent<MeshComponent>()) {
+    if (!node->locked && node->GetComponent<MeshComponent>()) {
+        auto* mesh = node->GetComponent<MeshComponent>();
         glm::vec3 localMin, localMax;
         mesh->GetLocalBounds(localMin, localMax);
 
@@ -283,12 +324,14 @@ TNode* DebugUI::PickAtCursor(Scene* activeScene) {
     };
 
     for (TNode* lightNode : activeScene->GetLights()) {
+        if (lightNode->locked) continue;
         if (auto* light = lightNode->GetComponent<LightComponent>()) {
             testCandidate(lightNode, light->GetPosition(), GizmoRenderer::kLightGizmoRadius);
         }
     }
 
     for (TNode* cameraNode : activeScene->GetCameras()) {
+        if (cameraNode->locked) continue;
         testCandidate(cameraNode, cameraNode->getGlobalPosition(), GizmoRenderer::kCameraGizmoRadius);
     }
 
@@ -301,11 +344,90 @@ void DebugUI::SelectNode(TNode* node) {
     selectedNode = node;
     sceneSelected = false;
     gizmoMode = GizmoMode::Move;
+    multiSelectedNodes.clear();
+}
+
+bool DebugUI::IsMultiSelected(TNode* node) {
+    return std::find(multiSelectedNodes.begin(), multiSelectedNodes.end(), node) != multiSelectedNodes.end();
+}
+
+void DebugUI::ToggleNodeInMultiSelect(TNode* node) {
+    if (!node) return;
+
+    // Starting a fresh multi-select: seed it with whatever was already selected.
+    if (multiSelectedNodes.empty() && selectedNode && selectedNode != node) {
+        multiSelectedNodes.push_back(selectedNode);
+    }
+
+    auto it = std::find(multiSelectedNodes.begin(), multiSelectedNodes.end(), node);
+    if (it != multiSelectedNodes.end()) {
+        multiSelectedNodes.erase(it);
+    } else {
+        multiSelectedNodes.push_back(node);
+    }
+
+    sceneSelected = false;
+    if (multiSelectedNodes.size() == 1) {
+        selectedNode = multiSelectedNodes[0];
+        multiSelectedNodes.clear();
+    } else if (multiSelectedNodes.empty()) {
+        selectedNode = nullptr;
+    } else {
+        selectedNode = node;
+    }
 }
 
 void DebugUI::SelectScene() {
     selectedNode = nullptr;
     sceneSelected = true;
+    multiSelectedNodes.clear();
+}
+
+void DebugUI::FocusOnSelected(Scene* activeScene) {
+    if (!selectedNode || !activeScene) return;
+
+    TNode* cameraNode = activeScene->GetMainCamera();
+    if (!cameraNode) return;
+    auto* camera = cameraNode->GetComponent<CameraComponent>();
+    if (!camera) return;
+
+    glm::vec3 center;
+    float radius;
+
+    if (auto* mesh = selectedNode->GetComponent<MeshComponent>()) {
+        glm::vec3 localMin, localMax;
+        mesh->GetLocalBounds(localMin, localMax);
+
+        glm::mat4 model = selectedNode->getModelMatrix();
+        glm::vec3 worldMin(std::numeric_limits<float>::max());
+        glm::vec3 worldMax(-std::numeric_limits<float>::max());
+        for (int i = 0; i < 8; ++i) {
+            glm::vec3 corner(
+                (i & 1) ? localMax.x : localMin.x,
+                (i & 2) ? localMax.y : localMin.y,
+                (i & 4) ? localMax.z : localMin.z);
+            glm::vec3 worldCorner = glm::vec3(model * glm::vec4(corner, 1.0f));
+            worldMin = glm::min(worldMin, worldCorner);
+            worldMax = glm::max(worldMax, worldCorner);
+        }
+
+        center = (worldMin + worldMax) * 0.5f;
+        radius = glm::length(worldMax - worldMin) * 0.5f;
+    } else if (auto* light = selectedNode->GetComponent<LightComponent>()) {
+        center = light->GetPosition();
+        radius = GizmoRenderer::kLightGizmoRadius * 1.3f;
+    } else {
+        center = selectedNode->getGlobalPosition();
+        radius = GizmoRenderer::kCameraGizmoRadius * 1.3f;
+    }
+
+    radius = std::max(radius, 0.5f);
+
+    // Distance so the object's bounding sphere comfortably fits in the vertical FOV.
+    float distance = radius / std::tan(glm::radians(camera->fov) * 0.5f);
+    distance = std::max(distance, radius * 1.5f);
+
+    cameraNode->transform.position = center - camera->GetForward() * distance;
 }
 
 namespace {
@@ -323,10 +445,6 @@ float SnapValue(float value, float increment) {
     if (increment <= 0.0f) return value;
     return std::round(value / increment) * increment;
 }
-
-constexpr float kPositionSnap = 0.5f;
-constexpr float kRotationSnapDegrees = 15.0f;
-constexpr float kScaleSnap = 0.1f;
 
 } // namespace
 
@@ -401,7 +519,17 @@ GizmoHandle DebugUI::PickGizmoHandle(Scene* activeScene) {
 
 void DebugUI::BeginGizmoDrag(GizmoHandle handle, Scene* activeScene) {
     TNode* node = selectedNode;
-    if (!node || !activeScene || handle == GizmoHandle::None) return;
+    if (!node || !activeScene || handle == GizmoHandle::None || node->locked) return;
+
+    bool isMoveHandle = handle == GizmoHandle::MoveX || handle == GizmoHandle::MoveY || handle == GizmoHandle::MoveZ;
+    if (isMoveHandle && ImGui::GetIO().KeyCtrl && node->parent) {
+        TNode* duplicate = SceneSerializer::DuplicateNode(node, activeScene);
+        if (duplicate) {
+            node->parent->addChild(duplicate);
+            SelectNode(duplicate);
+            node = duplicate;
+        }
+    }
 
     activeHandle = handle;
     dragNode = node;
@@ -457,7 +585,7 @@ void DebugUI::UpdateGizmoDrag(Scene* activeScene) {
 
         constexpr float kUniformScaleSensitivity = 0.01f;
         float multiplier = 1.0f + pixelDelta * kUniformScaleSensitivity;
-        if (snap) multiplier = SnapValue(multiplier, kScaleSnap);
+        if (snap) multiplier = SnapValue(multiplier, EngineSettings::GetScaleSnap());
 
         glm::vec3 newScale = dragStartLocalScale * multiplier;
         newScale = glm::max(newScale, glm::vec3(0.01f));
@@ -483,9 +611,10 @@ void DebugUI::UpdateGizmoDrag(Scene* activeScene) {
         glm::vec3 localDelta = glm::vec3(parentInverse * glm::vec4(worldDelta, 0.0f));
         glm::vec3 newPosition = dragStartLocalPosition + localDelta;
         if (snap) {
-            newPosition.x = SnapValue(newPosition.x, kPositionSnap);
-            newPosition.y = SnapValue(newPosition.y, kPositionSnap);
-            newPosition.z = SnapValue(newPosition.z, kPositionSnap);
+            float posSnap = EngineSettings::GetPositionSnap();
+            newPosition.x = SnapValue(newPosition.x, posSnap);
+            newPosition.y = SnapValue(newPosition.y, posSnap);
+            newPosition.z = SnapValue(newPosition.z, posSnap);
         }
         node->transform.position = newPosition;
     } else if (activeHandle == GizmoHandle::ScaleX || activeHandle == GizmoHandle::ScaleY || activeHandle == GizmoHandle::ScaleZ) {
@@ -498,7 +627,7 @@ void DebugUI::UpdateGizmoDrag(Scene* activeScene) {
 
         constexpr float kScaleSensitivity = 1.0f;
         float multiplier = 1.0f + signedDistance * kScaleSensitivity;
-        if (snap) multiplier = SnapValue(multiplier, kScaleSnap);
+        if (snap) multiplier = SnapValue(multiplier, EngineSettings::GetScaleSnap());
 
         glm::vec3 newScale = dragStartLocalScale;
         float* scaleAxis = &newScale.x + axis;
@@ -522,7 +651,7 @@ void DebugUI::UpdateGizmoDrag(Scene* activeScene) {
             glm::vec3 newRotation = dragStartLocalRotation;
             float* rotAxis = &newRotation.x + axis;
             *rotAxis += glm::degrees(angleDelta);
-            if (snap) *rotAxis = SnapValue(*rotAxis, kRotationSnapDegrees);
+            if (snap) *rotAxis = SnapValue(*rotAxis, EngineSettings::GetRotationSnapDegrees());
             node->transform.rotation = newRotation;
         }
     }
@@ -558,15 +687,15 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
 
     if (!ImGui::GetIO().WantTextInput) {
         if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S)) {
-            std::filesystem::create_directories("scenes");
-            std::string fileName = "scenes/" + sceneManager->GetActiveSceneName() + ".scene";
-            SceneSerializer::SaveScene(activeScene, fileName);
+            sceneToSave = sceneManager->GetActiveSceneName();
+            showSaveConfirm = true;
         }
 
         if (selectedNode) {
             if (ImGui::IsKeyPressed(ImGuiKey_W)) gizmoMode = GizmoMode::Move;
             if (ImGui::IsKeyPressed(ImGuiKey_E)) gizmoMode = GizmoMode::Rotate;
             if (ImGui::IsKeyPressed(ImGuiKey_R)) gizmoMode = GizmoMode::Scale;
+            if (ImGui::IsKeyPressed(ImGuiKey_F)) FocusOnSelected(activeScene);
 
             if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D)) {
                 TNode* parent = selectedNode->parent;
@@ -610,6 +739,11 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
             EngineSettings::SetFrustumCullingEnabled(cullingEnabled);
         }
 
+        bool wireframeEnabled = EngineSettings::IsWireframeEnabled();
+        if (ImGui::Checkbox("Wireframe", &wireframeEnabled)) {
+            EngineSettings::SetWireframeEnabled(wireframeEnabled);
+        }
+
         bool shadowsEnabled = EngineSettings::AreShadowsEnabled();
         if (ImGui::Checkbox("Shadows", &shadowsEnabled)) {
             EngineSettings::SetShadowsEnabled(shadowsEnabled);
@@ -645,6 +779,30 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
             ImGui::Unindent();
         }
 
+        bool iblEnabled = EngineSettings::IsIBLEnabled();
+        if (ImGui::Checkbox("IBL", &iblEnabled)) {
+            EngineSettings::SetIBLEnabled(iblEnabled);
+        }
+
+        if (ImGui::TreeNode("Gizmo Snap (Ctrl+Drag)")) {
+            float posSnap = EngineSettings::GetPositionSnap();
+            if (ImGui::DragFloat("Position", &posSnap, 0.05f, 0.01f, 100.0f)) {
+                EngineSettings::SetPositionSnap(posSnap);
+            }
+
+            float rotSnap = EngineSettings::GetRotationSnapDegrees();
+            if (ImGui::DragFloat("Rotation (deg)", &rotSnap, 0.5f, 1.0f, 180.0f)) {
+                EngineSettings::SetRotationSnapDegrees(rotSnap);
+            }
+
+            float scaleSnap = EngineSettings::GetScaleSnap();
+            if (ImGui::DragFloat("Scale", &scaleSnap, 0.01f, 0.01f, 10.0f)) {
+                EngineSettings::SetScaleSnap(scaleSnap);
+            }
+
+            ImGui::TreePop();
+        }
+
         if (ImGui::Button("Save Settings")) {
             EngineConfig::Save();
         }
@@ -665,15 +823,20 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
                 ImGui::Text("Scene Hierarchy:");
                 ImGui::Separator();
 
+                ImGui::SetNextItemWidth(-1);
+                ImGui::InputTextWithHint("##SceneTreeFilter", "Filter by name...", sceneTreeFilter, sizeof(sceneTreeFilter));
+
                 ImGui::BeginChild("SceneTreeChild", ImVec2(0, 400), true);
 
-                ImGuiTreeNodeFlags sceneFlags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-                if (sceneSelected) sceneFlags |= ImGuiTreeNodeFlags_Selected;
-                ImGui::TreeNodeEx("Scene##sceneEntry", sceneFlags);
-                if (ImGui::IsItemClicked()) {
-                    SelectScene();
+                if (sceneTreeFilter[0] == '\0') {
+                    ImGuiTreeNodeFlags sceneFlags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+                    if (sceneSelected) sceneFlags |= ImGuiTreeNodeFlags_Selected;
+                    ImGui::TreeNodeEx("Scene##sceneEntry", sceneFlags);
+                    if (ImGui::IsItemClicked()) {
+                        SelectScene();
+                    }
+                    ImGui::Separator();
                 }
-                ImGui::Separator();
 
                 TNode* root = activeScene->GetRoot();
                 if (root) {
@@ -731,6 +894,8 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
     DrawInspector(activeScene);
     DrawDeleteConfirmation();
     DrawNodeDeleteConfirmation();
+    DrawMultiDeleteConfirmation();
+    DrawSaveConfirmation();
 }
 
 std::string DebugUI::DescribeNode(TNode* node) {
@@ -763,8 +928,29 @@ std::string DebugUI::DescribeNode(TNode* node) {
     return desc;
 }
 
+bool DebugUI::NodeMatchesFilter(TNode* node, const std::string& filter) {
+    if (!node) return false;
+    if (filter.empty()) return true;
+
+    std::string name = node->name;
+    std::string lowerName(name.size(), '\0');
+    std::transform(name.begin(), name.end(), lowerName.begin(), [](unsigned char c) { return std::tolower(c); });
+
+    if (lowerName.find(filter) != std::string::npos) return true;
+
+    for (TNode* child : node->children) {
+        if (NodeMatchesFilter(child, filter)) return true;
+    }
+    return false;
+}
+
 void DebugUI::DrawSceneTree(TNode* node, Scene* activeScene, int depth) {
     if (!node) return;
+
+    std::string activeFilter = sceneTreeFilter;
+    std::transform(activeFilter.begin(), activeFilter.end(), activeFilter.begin(),
+        [](unsigned char c) { return std::tolower(c); });
+    if (!NodeMatchesFilter(node, activeFilter)) return;
 
     std::string idSuffix = "##" + std::to_string(reinterpret_cast<uintptr_t>(node));
 
@@ -791,7 +977,11 @@ void DebugUI::DrawSceneTree(TNode* node, Scene* activeScene, int depth) {
         flags |= ImGuiTreeNodeFlags_Leaf;
     }
 
-    if (node == selectedNode) {
+    if (!activeFilter.empty()) {
+        ImGui::SetNextItemOpen(true, ImGuiCond_Always);
+    }
+
+    if (node == selectedNode || IsMultiSelected(node)) {
         flags |= ImGuiTreeNodeFlags_Selected;
     }
 
@@ -802,44 +992,72 @@ void DebugUI::DrawSceneTree(TNode* node, Scene* activeScene, int depth) {
     bool opened = ImGui::TreeNodeEx(label.c_str(), flags);
 
     if (ImGui::IsItemClicked()) {
-        SelectNode(node);
+        if (ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeyShift) {
+            ToggleNodeInMultiSelect(node);
+        } else {
+            SelectNode(node);
+        }
+    }
+
+    ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - 44.0f);
+    std::string lockLabel = std::string(node->locked ? "L" : "U") + idSuffix + "lock";
+    if (ImGui::SmallButton(lockLabel.c_str())) {
+        node->locked = !node->locked;
+    }
+
+    ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - 20.0f);
+    std::string visLabel = std::string(node->visible ? "O" : "-") + idSuffix + "vis";
+    if (ImGui::SmallButton(visLabel.c_str())) {
+        node->visible = !node->visible;
     }
 
     if (ImGui::BeginPopupContextItem(("NodeContextMenu" + idSuffix).c_str())) {
-        SelectNode(node);
-
-        if (ImGui::MenuItem("Rename")) {
-            renamingNode = node;
-            renameJustStarted = true;
-            std::string current = node->name.empty() ? "Unnamed" : node->name;
-            std::snprintf(renameBuffer, sizeof(renameBuffer), "%s", current.c_str());
+        if (multiSelectedNodes.empty() || !IsMultiSelected(node)) {
+            SelectNode(node);
         }
 
-        if (ImGui::MenuItem("Delete")) {
-            nodeToDelete = node;
-            showNodeDeleteConfirm = true;
+        if (!multiSelectedNodes.empty()) {
+            if (ImGui::MenuItem(("Delete " + std::to_string(multiSelectedNodes.size()) + " Selected").c_str())) {
+                showMultiDeleteConfirm = true;
+            }
+        } else {
+            if (ImGui::MenuItem("Rename")) {
+                renamingNode = node;
+                renameJustStarted = true;
+                std::string current = node->name.empty() ? "Unnamed" : node->name;
+                std::snprintf(renameBuffer, sizeof(renameBuffer), "%s", current.c_str());
+            }
+
+            if (ImGui::MenuItem("Delete")) {
+                nodeToDelete = node;
+                showNodeDeleteConfirm = true;
+            }
+
+            ImGui::Separator();
+
+            DrawCreateMenu(node, activeScene);
+
+            if (ImGui::MenuItem("Add Empty Object")) {
+                TNode* empty = new TNode(nullptr, "Empty");
+                node->addChild(empty);
+                SelectNode(empty);
+            }
+
+            ImGui::Separator();
+            DrawAddComponentMenu(node, activeScene);
         }
-
-        ImGui::Separator();
-
-        DrawCreateMenu(node, activeScene);
-
-        if (ImGui::MenuItem("Add Empty Object")) {
-            TNode* empty = new TNode(nullptr, "Empty");
-            node->addChild(empty);
-            SelectNode(empty);
-        }
-
-        ImGui::Separator();
-        DrawAddComponentMenu(node, activeScene);
 
         ImGui::EndPopup();
     }
 
-    if (selectedNode == node && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)
+    if ((selectedNode == node || IsMultiSelected(node)) && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)
         && ImGui::IsKeyPressed(ImGuiKey_Delete)) {
-        nodeToDelete = node;
-        showNodeDeleteConfirm = true;
+        if (!multiSelectedNodes.empty()) {
+            showMultiDeleteConfirm = true;
+        } else {
+            nodeToDelete = node;
+            showNodeDeleteConfirm = true;
+        }
     }
 
     if (opened) {
@@ -895,8 +1113,55 @@ void DebugUI::DrawNodeProperties(TNode* node) {
     ImGui::Separator();
 
     ImGui::DragFloat3("Position##transform", &node->transform.position.x, 0.1f);
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Reset##pos")) node->transform.position = glm::vec3(0.0f);
+
     ImGui::DragFloat3("Rotation##transform", &node->transform.rotation.x, 1.0f);
-    ImGui::DragFloat3("Scale##transform", &node->transform.scale.x, 0.1f);
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Reset##rot")) node->transform.rotation = glm::vec3(0.0f);
+
+    ImGui::Checkbox("Uniform##scaleLock", &uniformScaleLock);
+    ImGui::SameLine();
+    if (uniformScaleLock) {
+        float uniformScale = node->transform.scale.x;
+        if (ImGui::DragFloat("Scale##transform", &uniformScale, 0.1f)) {
+            node->transform.scale = glm::vec3(uniformScale);
+        }
+    } else {
+        ImGui::DragFloat3("Scale##transform", &node->transform.scale.x, 0.1f);
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Reset##scale")) node->transform.scale = glm::vec3(1.0f);
+
+    if (ImGui::SmallButton("Reset Transform")) {
+        node->transform.position = glm::vec3(0.0f);
+        node->transform.rotation = glm::vec3(0.0f);
+        node->transform.scale = glm::vec3(1.0f);
+    }
+
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Copy Transform")) {
+        copiedTransform = node->transform;
+        hasCopiedTransform = true;
+    }
+
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!hasCopiedTransform);
+    if (ImGui::SmallButton("Paste Transform")) {
+        node->transform = copiedTransform;
+    }
+    ImGui::EndDisabled();
+
+    if (auto* mesh = node->GetComponent<MeshComponent>()) {
+        if (ImGui::SmallButton("Recenter Pivot")) {
+            glm::vec3 localShift = mesh->RecenterPivot();
+            glm::vec3 rotatedScaledShift = glm::vec3(node->transform.getModelMatrix() * glm::vec4(localShift, 0.0f));
+            node->transform.position += rotatedScaledShift;
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Moves this node's origin to the center of its mesh bounds,\nwithout visually moving the geometry.");
+        }
+    }
 
     ImGui::Spacing();
     ImGui::Text("Hierarchy:");
@@ -938,6 +1203,11 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                 bool gridVisible = activeScene->IsGridVisible();
                 if (ImGui::Checkbox("Show Grid", &gridVisible)) {
                     activeScene->SetGridVisible(gridVisible);
+                }
+
+                glm::vec3 clearColor = activeScene->GetClearColor();
+                if (ImGui::ColorEdit3("Background Color", &clearColor.x)) {
+                    activeScene->SetClearColor(clearColor);
                 }
             }
 
@@ -1015,6 +1285,8 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                     }
                     ImGui::BulletText("Normal Texture: %s", mat->normal ? "Yes" : "No");
                     ImGui::BulletText("MetallicRoughness Texture: %s", mat->metallicRoughness ? "Yes" : "No");
+                    ImGui::SliderFloat("Metallic##material", &mat->metallicFactor, 0.0f, 1.0f);
+                    ImGui::SliderFloat("Roughness##material", &mat->roughnessFactor, 0.0f, 1.0f);
                 } else {
                     ImGui::BulletText("No material resource");
                 }
@@ -1130,6 +1402,48 @@ void DebugUI::DrawDeleteConfirmation() {
     }
 }
 
+void DebugUI::DrawSaveConfirmation() {
+    if (!showSaveConfirm) return;
+
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(400, -1), ImGuiCond_FirstUseEver);
+
+    bool open = true;
+    if (ImGui::Begin("Overwrite Scene?", &open, ImGuiWindowFlags_Modal | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextWrapped("Save and overwrite:\n\n\"%s\"", sceneToSave.c_str());
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        float buttonWidth = 140.0f;
+        float spacing = ImGui::GetStyle().ItemSpacing.x;
+        float totalWidth = (buttonWidth * 2) + spacing;
+        ImGui::SetCursorPosX((ImGui::GetWindowSize().x - totalWidth) * 0.5f);
+
+        if (ImGui::Button("Save", ImVec2(buttonWidth, 0))) {
+            std::filesystem::create_directories("scenes");
+            std::string fileName = "scenes/" + sceneToSave + ".scene";
+            SceneSerializer::SaveScene(SceneManager::Instance().GetActiveScene(), fileName);
+            showSaveConfirm = false;
+            sceneToSave = "";
+        }
+
+        ImGui::SameLine();
+
+        if (ImGui::Button("Cancel", ImVec2(buttonWidth, 0))) {
+            showSaveConfirm = false;
+            sceneToSave = "";
+        }
+
+        ImGui::End();
+    }
+
+    if (!open) {
+        showSaveConfirm = false;
+    }
+}
+
 void DebugUI::DeleteNode(TNode* node, Scene* activeScene) {
     if (!node) return;
 
@@ -1157,6 +1471,7 @@ void DebugUI::DeleteNode(TNode* node, Scene* activeScene) {
     if (renamingNode == node) {
         renamingNode = nullptr;
     }
+    multiSelectedNodes.erase(std::remove(multiSelectedNodes.begin(), multiSelectedNodes.end(), node), multiSelectedNodes.end());
 
     node->removeFromParent();
     delete node;
@@ -1219,14 +1534,24 @@ void DebugUI::DrawAddComponentMenu(TNode* node, Scene* activeScene) {
 void DebugUI::DrawCreateMenu(TNode* parent, Scene* activeScene) {
     if (!parent) return;
 
+    // Converts a desired world-space spawn position into the new node's
+    // local transform, accounting for the parent's own transform.
+    auto placeAtSpawnPoint = [&](TNode* node) {
+        glm::vec3 worldPos = ComputeSpawnWorldPosition(activeScene);
+        glm::mat4 parentInverse = glm::inverse(parent->getModelMatrix());
+        node->transform.position = glm::vec3(parentInverse * glm::vec4(worldPos, 1.0f));
+    };
+
     if (ImGui::MenuItem("Cube")) {
         TNode* node = SpawnCubeNode();
+        placeAtSpawnPoint(node);
         parent->addChild(node);
         SelectNode(node);
     }
 
     if (ImGui::MenuItem("Camera")) {
         TNode* node = SpawnCameraNode();
+        placeAtSpawnPoint(node);
         parent->addChild(node);
         if (activeScene) activeScene->RegisterCamera(node);
         SelectNode(node);
@@ -1241,12 +1566,14 @@ void DebugUI::DrawCreateMenu(TNode* parent, Scene* activeScene) {
         }
         if (ImGui::MenuItem("Point")) {
             TNode* node = SpawnLightNode(LightType::Point);
+            placeAtSpawnPoint(node);
             parent->addChild(node);
             if (activeScene) activeScene->RegisterLight(node);
             SelectNode(node);
         }
         if (ImGui::MenuItem("Spot")) {
             TNode* node = SpawnLightNode(LightType::Spot);
+            placeAtSpawnPoint(node);
             parent->addChild(node);
             if (activeScene) activeScene->RegisterLight(node);
             SelectNode(node);
@@ -1295,6 +1622,49 @@ void DebugUI::DrawNodeDeleteConfirmation() {
     if (!open) {
         nodeToDelete = nullptr;
         showNodeDeleteConfirm = false;
+    }
+}
+
+void DebugUI::DrawMultiDeleteConfirmation() {
+    if (!showMultiDeleteConfirm || multiSelectedNodes.empty()) return;
+
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSize(ImVec2(400, -1), ImGuiCond_FirstUseEver);
+
+    bool open = true;
+    if (ImGui::Begin("Delete Nodes?", &open, ImGuiWindowFlags_Modal | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextWrapped("Are you sure you want to delete %zu selected nodes?\n\nThis will also delete all of their children. This action cannot be undone.", multiSelectedNodes.size());
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        float buttonWidth = 140.0f;
+        float spacing = ImGui::GetStyle().ItemSpacing.x;
+        float totalWidth = (buttonWidth * 2) + spacing;
+        ImGui::SetCursorPosX((ImGui::GetWindowSize().x - totalWidth) * 0.5f);
+
+        if (ImGui::Button("Delete Forever##multi", ImVec2(buttonWidth, 0))) {
+            std::vector<TNode*> toDelete = multiSelectedNodes;
+            Scene* activeScene = SceneManager::Instance().GetActiveScene();
+            for (TNode* node : toDelete) {
+                DeleteNode(node, activeScene);
+            }
+            multiSelectedNodes.clear();
+            showMultiDeleteConfirm = false;
+        }
+
+        ImGui::SameLine();
+
+        if (ImGui::Button("Cancel##multi", ImVec2(buttonWidth, 0))) {
+            showMultiDeleteConfirm = false;
+        }
+
+        ImGui::End();
+    }
+
+    if (!open) {
+        showMultiDeleteConfirm = false;
     }
 }
 
