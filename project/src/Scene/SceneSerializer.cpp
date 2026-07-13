@@ -14,6 +14,7 @@
 #include "Core/Log.h"
 #include <json.hpp>
 #include <fstream>
+#include <filesystem>
 
 using json = nlohmann::json;
 
@@ -137,11 +138,23 @@ json SerializeComponents(const TNode* node) {
 
             auto serializeTextureSlot = [&](const char* key, const std::shared_ptr<Texture>& tex) {
                 if (!tex) return;
+
                 if (tex->GetFilePath().empty()) {
-                    Log::Info("SceneSerializer: skipping embedded texture on material for node '" + node->name +
-                              "' (no file path to persist)");
-                    return;
+                    // Embedded glTF texture (no source file on disk) -- bake it out to a
+                    // real PNG once so it can be persisted and reloaded like any other asset.
+                    std::filesystem::create_directories("resources/textures/generated");
+                    std::string safeName = tex->GetName();
+                    for (char& c : safeName) {
+                        if (c == '/' || c == '\\' || c == ':' || c == '.') c = '_';
+                    }
+                    std::string bakedPath = "resources/textures/generated/" + safeName + ".png";
+                    if (!tex->SaveToPNG(bakedPath)) {
+                        Log::Info("SceneSerializer: skipping embedded texture on material for node '" + node->name +
+                                  "' (failed to bake to disk)");
+                        return;
+                    }
                 }
+
                 json t;
                 t["name"] = tex->GetName();
                 t["path"] = tex->GetFilePath();

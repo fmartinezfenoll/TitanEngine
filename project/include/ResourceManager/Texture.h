@@ -20,6 +20,12 @@ public:
     bool IsValid() const { return ID != 0; }
     const std::string& GetFilePath() const { return FilePath; }
 
+    // Reads the texture back from the GPU and writes it to disk as a PNG,
+    // then updates GetFilePath() to point at it. Used to bake embedded glTF
+    // textures (no FilePath) into real files so they can be persisted by
+    // SceneSerializer. Returns false on failure (FilePath left unchanged).
+    bool SaveToPNG(const std::string& path);
+
 private:
     unsigned int ID = 0;
     int Width = 0;

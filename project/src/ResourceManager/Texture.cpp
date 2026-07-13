@@ -3,6 +3,8 @@
 
 #include <glad/glad.h>
 #include <stb_image.h>
+#include <stb_image_write.h>
+#include <vector>
 
 Texture::Texture(const std::string& name, const std::string& filePath)
     : Resource(name), FilePath(filePath)
@@ -63,4 +65,32 @@ void Texture::Bind(unsigned int slot) const
 {
     glActiveTexture(GL_TEXTURE0 + slot);
     glBindTexture(GL_TEXTURE_2D, ID);
+}
+
+bool Texture::SaveToPNG(const std::string& path)
+{
+    if (ID == 0 || Width <= 0 || Height <= 0)
+    {
+        Log::Error("Texture::SaveToPNG: texture is not valid, cannot bake to " + path);
+        return false;
+    }
+
+    std::vector<unsigned char> pixels(static_cast<size_t>(Width) * Height * 4);
+
+    glBindTexture(GL_TEXTURE_2D, ID);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    // Textures are uploaded unflipped (stbi_set_flip_vertically_on_load(false) in the
+    // loader above), so glGetTexImage returns rows in the same top-to-bottom order as
+    // the original file -- no flip needed when writing back out.
+    int result = stbi_write_png(path.c_str(), Width, Height, 4, pixels.data(), Width * 4);
+    if (!result)
+    {
+        Log::Error("Texture::SaveToPNG: failed to write " + path);
+        return false;
+    }
+
+    FilePath = path;
+    return true;
 }
