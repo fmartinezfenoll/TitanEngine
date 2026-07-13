@@ -20,21 +20,14 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <imgui.h>
+#include <backends/imgui_impl_glfw.h>
+#include <backends/imgui_impl_opengl3.h>
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
 #include <iostream>
 #include <limits>
 #include <vector>
-
-// ImGui backend function declarations (headers not available, declared from backends/*.cpp)
-extern bool ImGui_ImplGlfw_InitForOpenGL(GLFWwindow* window, bool install_callbacks);
-extern void ImGui_ImplGlfw_Shutdown();
-extern void ImGui_ImplGlfw_NewFrame();
-extern bool ImGui_ImplOpenGL3_Init(const char* glsl_version = nullptr);
-extern void ImGui_ImplOpenGL3_Shutdown();
-extern void ImGui_ImplOpenGL3_NewFrame();
-extern void ImGui_ImplOpenGL3_RenderDrawData(ImDrawData* draw_data);
 
 namespace {
     constexpr unsigned int kShadowTextureUnitBase = 3; // 0-2 reserved by Material (albedo/normal/metallicRoughness)
@@ -124,7 +117,9 @@ bool OpenGLRenderer::Init(int width, int height, const std::string& appName)
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    ImGui::StyleColorsDark();
+    ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    DebugUI::ApplyTheme();
     ImGui_ImplGlfw_InitForOpenGL(static_cast<GLFWwindow*>(window), true);
     ImGui_ImplOpenGL3_Init("#version 450");
 

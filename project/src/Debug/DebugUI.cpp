@@ -176,6 +176,89 @@ void DebugUI::Init() {
     // ImGui context is already created by OpenGLRenderer
 }
 
+void DebugUI::ApplyTheme() {
+    ImGui::StyleColorsDark();
+
+    ImGuiStyle& style = ImGui::GetStyle();
+    style.WindowRounding = 6.0f;
+    style.ChildRounding = 4.0f;
+    style.FrameRounding = 3.0f;
+    style.PopupRounding = 4.0f;
+    style.ScrollbarRounding = 6.0f;
+    style.GrabRounding = 3.0f;
+    style.TabRounding = 4.0f;
+    style.WindowBorderSize = 1.0f;
+    style.FrameBorderSize = 0.0f;
+    style.PopupBorderSize = 1.0f;
+    style.WindowPadding = ImVec2(10.0f, 10.0f);
+    style.FramePadding = ImVec2(6.0f, 4.0f);
+    style.ItemSpacing = ImVec2(8.0f, 6.0f);
+    style.IndentSpacing = 16.0f;
+    style.ScrollbarSize = 14.0f;
+    style.GrabMinSize = 10.0f;
+
+    ImVec4* colors = style.Colors;
+    const ImVec4 bgDarkest  = ImVec4(0.086f, 0.090f, 0.106f, 1.00f);
+    const ImVec4 bgDark     = ImVec4(0.114f, 0.118f, 0.137f, 1.00f);
+    const ImVec4 bgMid      = ImVec4(0.145f, 0.149f, 0.173f, 1.00f);
+    const ImVec4 bgLight    = ImVec4(0.188f, 0.192f, 0.220f, 1.00f);
+    const ImVec4 border     = ImVec4(0.243f, 0.247f, 0.278f, 1.00f);
+    const ImVec4 textMain   = ImVec4(0.870f, 0.878f, 0.898f, 1.00f);
+    const ImVec4 textDim    = ImVec4(0.520f, 0.533f, 0.573f, 1.00f);
+    const ImVec4 accent     = ImVec4(0.259f, 0.588f, 0.980f, 1.00f);
+    const ImVec4 accentDim  = ImVec4(0.259f, 0.588f, 0.980f, 0.50f);
+    const ImVec4 accentHi   = ImVec4(0.380f, 0.680f, 1.000f, 1.00f);
+
+    colors[ImGuiCol_Text]                  = textMain;
+    colors[ImGuiCol_TextDisabled]          = textDim;
+    colors[ImGuiCol_WindowBg]              = bgDark;
+    colors[ImGuiCol_ChildBg]               = ImVec4(0, 0, 0, 0);
+    colors[ImGuiCol_PopupBg]               = bgDarkest;
+    colors[ImGuiCol_Border]                = border;
+    colors[ImGuiCol_BorderShadow]          = ImVec4(0, 0, 0, 0);
+    colors[ImGuiCol_FrameBg]               = bgMid;
+    colors[ImGuiCol_FrameBgHovered]        = bgLight;
+    colors[ImGuiCol_FrameBgActive]         = accentDim;
+    colors[ImGuiCol_TitleBg]               = bgDarkest;
+    colors[ImGuiCol_TitleBgActive]         = bgDarkest;
+    colors[ImGuiCol_TitleBgCollapsed]      = bgDarkest;
+    colors[ImGuiCol_MenuBarBg]             = bgDarkest;
+    colors[ImGuiCol_ScrollbarBg]           = bgDarkest;
+    colors[ImGuiCol_ScrollbarGrab]         = bgLight;
+    colors[ImGuiCol_ScrollbarGrabHovered]  = border;
+    colors[ImGuiCol_ScrollbarGrabActive]   = accent;
+    colors[ImGuiCol_CheckMark]             = accentHi;
+    colors[ImGuiCol_SliderGrab]            = accent;
+    colors[ImGuiCol_SliderGrabActive]      = accentHi;
+    colors[ImGuiCol_Button]                = bgLight;
+    colors[ImGuiCol_ButtonHovered]         = accentDim;
+    colors[ImGuiCol_ButtonActive]          = accent;
+    colors[ImGuiCol_Header]                = accentDim;
+    colors[ImGuiCol_HeaderHovered]         = accent;
+    colors[ImGuiCol_HeaderActive]          = accentHi;
+    colors[ImGuiCol_Separator]             = border;
+    colors[ImGuiCol_SeparatorHovered]      = accent;
+    colors[ImGuiCol_SeparatorActive]       = accentHi;
+    colors[ImGuiCol_ResizeGrip]            = ImVec4(accent.x, accent.y, accent.z, 0.25f);
+    colors[ImGuiCol_ResizeGripHovered]     = ImVec4(accent.x, accent.y, accent.z, 0.55f);
+    colors[ImGuiCol_ResizeGripActive]      = accent;
+    colors[ImGuiCol_Tab]                   = bgDark;
+    colors[ImGuiCol_TabHovered]            = accentDim;
+    colors[ImGuiCol_TabSelected]           = bgMid;
+    colors[ImGuiCol_TabSelectedOverline]   = accent;
+    colors[ImGuiCol_TabDimmed]             = bgDarkest;
+    colors[ImGuiCol_TabDimmedSelected]     = bgMid;
+    colors[ImGuiCol_DockingPreview]        = accentDim;
+    colors[ImGuiCol_DockingEmptyBg]        = bgDarkest;
+    colors[ImGuiCol_PlotLines]             = accent;
+    colors[ImGuiCol_PlotLinesHovered]      = accentHi;
+    colors[ImGuiCol_PlotHistogram]         = accent;
+    colors[ImGuiCol_PlotHistogramHovered]  = accentHi;
+    colors[ImGuiCol_TextSelectedBg]        = accentDim;
+    colors[ImGuiCol_DragDropTarget]        = accentHi;
+    colors[ImGuiCol_NavHighlight]          = accent;
+}
+
 void DebugUI::Shutdown() {
     selectedNode = nullptr;
 }
@@ -664,11 +747,36 @@ void DebugUI::UpdateGizmoDrag(Scene* activeScene) {
     }
 }
 
+void DebugUI::DrawDockspace() {
+    ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(viewport->WorkPos);
+    ImGui::SetNextWindowSize(viewport->WorkSize);
+    ImGui::SetNextWindowViewport(viewport->ID);
+
+    ImGuiWindowFlags hostFlags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse
+        | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove
+        | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus
+        | ImGuiWindowFlags_NoBackground;
+
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    ImGui::Begin("DockspaceHost", nullptr, hostFlags);
+    ImGui::PopStyleVar(3);
+
+    ImGuiID dockspaceId = ImGui::GetID("MainDockspace");
+    ImGui::DockSpace(dockspaceId, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_PassthruCentralNode);
+
+    ImGui::End();
+}
+
 void DebugUI::DrawFrame(SceneManager* sceneManager) {
     if (!sceneManager) return;
 
     Scene* activeScene = sceneManager->GetActiveScene();
     if (!activeScene) return;
+
+    DrawDockspace();
 
     UpdateAutoSave(sceneManager);
 
@@ -839,7 +947,7 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
     ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(500, 700), ImGuiCond_FirstUseEver);
 
-    if (ImGui::Begin("Scene Debug", nullptr, ImGuiWindowFlags_NoMove)) {
+    if (ImGui::Begin("Scene Debug", nullptr)) {
         // Scene Selector at top
         DrawSceneSelector(sceneManager);
         ImGui::Separator();

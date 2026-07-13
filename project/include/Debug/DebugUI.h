@@ -17,6 +17,7 @@ class DebugUI {
 public:
     static void Init();
     static void Shutdown();
+    static void ApplyTheme();
     static void DrawFrame(SceneManager* sceneManager);
     static TNode* GetSelectedNode() { return selectedNode; }
     static GizmoMode GetGizmoMode() { return gizmoMode; }
@@ -48,6 +49,7 @@ private:
     static bool IsMultiSelected(TNode* node);
     static void DrawMultiDeleteConfirmation();
     static void UpdateAutoSave(SceneManager* sceneManager);
+    static void DrawDockspace();
 
     static TNode* selectedNode;
     static bool sceneSelected;
