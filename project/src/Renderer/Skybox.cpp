@@ -170,13 +170,13 @@ void Skybox::CreatePrefilterStorage()
     glGenTextures(1, &prefilterMapID);
     glBindTexture(GL_TEXTURE_CUBE_MAP, prefilterMapID);
 
-    for (int mip = 0; mip < kPrefilterMipLevels; ++mip) {
-        int mipRes = kPrefilterResolution >> mip;
-        for (int i = 0; i < 6; ++i) {
-            glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, mip, GL_RGB16F, mipRes, mipRes, 0,
-                         GL_RGB, GL_FLOAT, nullptr);
-        }
-    }
+    // Immutable storage (glTexStorage2D) reserves every mip level for all 6 faces in one
+    // call, unlike per-level/per-face glTexImage2D -- on some NVIDIA drivers, mutable
+    // storage left the cubemap's mipmap completeness state inconsistent between calls,
+    // making glFramebufferTexture2D report GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT for every
+    // mip level above 0 when re-targeting the same texture during the bake below.
+    glTexStorage2D(GL_TEXTURE_CUBE_MAP, kPrefilterMipLevels, GL_RGB16F,
+                   kPrefilterResolution, kPrefilterResolution);
 
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
