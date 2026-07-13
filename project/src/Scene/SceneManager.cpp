@@ -69,6 +69,34 @@ void SceneManager::UnloadScene(const std::string& name) {
     }
 }
 
+bool SceneManager::RenameScene(const std::string& oldName, const std::string& newName) {
+    if (oldName == newName || newName.empty()) return false;
+    if (scenes.find(newName) != scenes.end()) return false;
+
+    auto it = scenes.find(oldName);
+    if (it == scenes.end()) return false;
+
+    std::shared_ptr<Scene> scene = it->second;
+    scenes.erase(it);
+    scenes[newName] = scene;
+
+    if (activeSceneName == oldName) {
+        activeSceneName = newName;
+    }
+
+    std::string oldPath = "scenes/" + oldName + ".scene";
+    std::string newPath = "scenes/" + newName + ".scene";
+    if (std::filesystem::exists(oldPath)) {
+        std::error_code ec;
+        std::filesystem::rename(oldPath, newPath, ec);
+        if (ec) {
+            Log::Error("Failed to rename scene file: " + oldPath + " -> " + newPath);
+        }
+    }
+
+    return true;
+}
+
 void SceneManager::UnloadAllScenes() {
     scenes.clear();
     activeScene = nullptr;

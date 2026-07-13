@@ -1,4 +1,5 @@
 #pragma once
+#include <string>
 
 // Toggle for A/B performance comparisons of frustum culling.
 class EngineSettings {
@@ -42,6 +43,17 @@ public:
     static float GetScaleSnap() { return scaleSnap; }
     static void SetScaleSnap(float snap) { scaleSnap = snap; }
 
+    static bool IsAutoSaveEnabled() { return autoSaveEnabled; }
+    static void SetAutoSaveEnabled(bool enabled) { autoSaveEnabled = enabled; }
+
+    // Interval, in seconds, between automatic backup saves of the active scene.
+    static float GetAutoSaveIntervalSeconds() { return autoSaveIntervalSeconds; }
+    static void SetAutoSaveIntervalSeconds(float seconds) { autoSaveIntervalSeconds = seconds; }
+
+    // Name of the last scene that was active; reloaded automatically on startup.
+    static const std::string& GetLastActiveScene() { return lastActiveScene; }
+    static void SetLastActiveScene(const std::string& name) { lastActiveScene = name; }
+
 private:
     static inline bool frustumCullingEnabled = true;
     static inline bool shadowsEnabled = true;
@@ -54,4 +66,7 @@ private:
     static inline float positionSnap = 0.5f;
     static inline float rotationSnapDegrees = 15.0f;
     static inline float scaleSnap = 0.1f;
+    static inline bool autoSaveEnabled = true;
+    static inline float autoSaveIntervalSeconds = 300.0f;
+    static inline std::string lastActiveScene = "";
 };

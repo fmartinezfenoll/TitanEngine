@@ -16,6 +16,7 @@
 #include "Debug/DebugUI.h"
 #include "Core/Stats.h"
 #include "Core/EngineConfig.h"
+#include "Core/EngineSettings.h"
 #include <glm/glm.hpp>
 #include <filesystem>
 
@@ -213,7 +214,12 @@ void Application::SetupScenes()
         duckScene->AddNodeToRoot(BuildGroundPlaneNode(300.0f));
     }
 
-    sm.LoadScene("Duck Scene");
+    const std::string& lastActiveScene = EngineSettings::GetLastActiveScene();
+    if (!lastActiveScene.empty() && sm.GetScene(lastActiveScene)) {
+        sm.LoadScene(lastActiveScene);
+    } else {
+        sm.LoadScene("Duck Scene");
+    }
 
     for (const auto& [name, scene] : sm.GetAllScenes()) {
         if (!scene->GetMainCamera()) {

@@ -163,7 +163,14 @@ char DebugUI::sceneTreeFilter[128] = "";
 
 bool DebugUI::hasCopiedTransform = false;
 Transform DebugUI::copiedTransform = Transform();
-bool DebugUI::uniformScaleLock = false;
+bool DebugUI::scaleAxisLocked[3] = { false, false, false };
+
+float DebugUI::autoSaveTimer = 0.0f;
+std::string DebugUI::lastAutoSaveStatus = "";
+
+bool DebugUI::renamingScene = false;
+char DebugUI::sceneRenameBuffer[128] = "";
+std::string DebugUI::sceneRenameError = "";
 
 void DebugUI::Init() {
     // ImGui context is already created by OpenGLRenderer
@@ -663,6 +670,8 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
     Scene* activeScene = sceneManager->GetActiveScene();
     if (!activeScene) return;
 
+    UpdateAutoSave(sceneManager);
+
     if (!ImGui::GetIO().WantCaptureMouse) {
         if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && activeHandle == GizmoHandle::None) {
             GizmoHandle handle = PickGizmoHandle(activeScene);
@@ -798,6 +807,24 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
             float scaleSnap = EngineSettings::GetScaleSnap();
             if (ImGui::DragFloat("Scale", &scaleSnap, 0.01f, 0.01f, 10.0f)) {
                 EngineSettings::SetScaleSnap(scaleSnap);
+            }
+
+            ImGui::TreePop();
+        }
+
+        if (ImGui::TreeNode("Auto-Save")) {
+            bool autoSaveEnabled = EngineSettings::IsAutoSaveEnabled();
+            if (ImGui::Checkbox("Enabled##autosave", &autoSaveEnabled)) {
+                EngineSettings::SetAutoSaveEnabled(autoSaveEnabled);
+            }
+
+            float intervalSeconds = EngineSettings::GetAutoSaveIntervalSeconds();
+            if (ImGui::DragFloat("Interval (s)", &intervalSeconds, 5.0f, 10.0f, 3600.0f)) {
+                EngineSettings::SetAutoSaveIntervalSeconds(intervalSeconds);
+            }
+
+            if (!lastAutoSaveStatus.empty()) {
+                ImGui::TextDisabled("%s", lastAutoSaveStatus.c_str());
             }
 
             ImGui::TreePop();
@@ -1103,90 +1130,6 @@ void DebugUI::DrawResourcesTree() {
     ImGui::BulletText("Total Shader Files: %d", totalShaderFiles);
 }
 
-void DebugUI::DrawNodeProperties(TNode* node) {
-    if (!node) return;
-
-    ImGui::Text("Node Type: %s", node->components.empty() ? "Group" : "Entity");
-
-    ImGui::Spacing();
-    ImGui::Text("Transform:");
-    ImGui::Separator();
-
-    ImGui::DragFloat3("Position##transform", &node->transform.position.x, 0.1f);
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Reset##pos")) node->transform.position = glm::vec3(0.0f);
-
-    ImGui::DragFloat3("Rotation##transform", &node->transform.rotation.x, 1.0f);
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Reset##rot")) node->transform.rotation = glm::vec3(0.0f);
-
-    ImGui::Checkbox("Uniform##scaleLock", &uniformScaleLock);
-    ImGui::SameLine();
-    if (uniformScaleLock) {
-        float uniformScale = node->transform.scale.x;
-        if (ImGui::DragFloat("Scale##transform", &uniformScale, 0.1f)) {
-            node->transform.scale = glm::vec3(uniformScale);
-        }
-    } else {
-        ImGui::DragFloat3("Scale##transform", &node->transform.scale.x, 0.1f);
-    }
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Reset##scale")) node->transform.scale = glm::vec3(1.0f);
-
-    if (ImGui::SmallButton("Reset Transform")) {
-        node->transform.position = glm::vec3(0.0f);
-        node->transform.rotation = glm::vec3(0.0f);
-        node->transform.scale = glm::vec3(1.0f);
-    }
-
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Copy Transform")) {
-        copiedTransform = node->transform;
-        hasCopiedTransform = true;
-    }
-
-    ImGui::SameLine();
-    ImGui::BeginDisabled(!hasCopiedTransform);
-    if (ImGui::SmallButton("Paste Transform")) {
-        node->transform = copiedTransform;
-    }
-    ImGui::EndDisabled();
-
-    if (auto* mesh = node->GetComponent<MeshComponent>()) {
-        if (ImGui::SmallButton("Recenter Pivot")) {
-            glm::vec3 localShift = mesh->RecenterPivot();
-            glm::vec3 rotatedScaledShift = glm::vec3(node->transform.getModelMatrix() * glm::vec4(localShift, 0.0f));
-            node->transform.position += rotatedScaledShift;
-        }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Moves this node's origin to the center of its mesh bounds,\nwithout visually moving the geometry.");
-        }
-    }
-
-    ImGui::Spacing();
-    ImGui::Text("Hierarchy:");
-    ImGui::Separator();
-
-    ImGui::Text("Parent: %s", node->parent ? "Yes" : "None");
-    ImGui::Text("Children: %zu", node->children.size());
-
-    ImGui::Spacing();
-    ImGui::Text("Bounding Box:");
-    ImGui::Separator();
-
-    ImGui::Text("Has BoundingBox: %s", node->boundingBox ? "Yes" : "No");
-
-    if (node->boundingBox) {
-        ImGui::BulletText("Type: Sphere or AABB");
-    }
-
-    ImGui::Spacing();
-    ImGui::Text("Global Position: (%.2f, %.2f, %.2f)",
-        node->getGlobalPosition().x,
-        node->getGlobalPosition().y,
-        node->getGlobalPosition().z);
-}
-
 void DebugUI::DrawInspector(Scene* activeScene) {
     if (!selectedNode && !sceneSelected) return;
 
@@ -1221,143 +1164,224 @@ void DebugUI::DrawInspector(Scene* activeScene) {
     if (ImGui::Begin("Inspector", nullptr)) {
         ImGui::Text("Node: %s", selectedNode->name.empty() ? "Unnamed" : selectedNode->name.c_str());
         ImGui::Separator();
-        ImGui::Spacing();
 
-        ImGui::Text("Gizmo Mode:");
-        if (ImGui::RadioButton("Move (W)", gizmoMode == GizmoMode::Move)) gizmoMode = GizmoMode::Move;
-        ImGui::SameLine();
-        if (ImGui::RadioButton("Rotate (E)", gizmoMode == GizmoMode::Rotate)) gizmoMode = GizmoMode::Rotate;
-        ImGui::SameLine();
-        if (ImGui::RadioButton("Scale (R)", gizmoMode == GizmoMode::Scale)) gizmoMode = GizmoMode::Scale;
-
-        ImGui::Text("Gizmo Space:");
-        if (ImGui::RadioButton("Global", gizmoSpace == GizmoSpace::Global)) gizmoSpace = GizmoSpace::Global;
-        ImGui::SameLine();
-        if (ImGui::RadioButton("Local", gizmoSpace == GizmoSpace::Local)) gizmoSpace = GizmoSpace::Local;
-        ImGui::TextDisabled("Hold Ctrl while dragging to snap");
-
-        ImGui::Text("Transform:");
-        ImGui::Separator();
-        ImGui::DragFloat3("Position##inspector", &selectedNode->transform.position.x, 0.1f);
-        ImGui::DragFloat3("Rotation##inspector", &selectedNode->transform.rotation.x, 1.0f);
-        ImGui::DragFloat3("Scale##inspector", &selectedNode->transform.scale.x, 0.1f);
-
-        ImGui::Spacing();
-        ImGui::Text("Components: %zu", selectedNode->components.size());
-        ImGui::Separator();
-
-        if (selectedNode->components.empty()) {
-            ImGui::BulletText("No components (Group Node)");
-        }
-
-        if (auto* mesh = selectedNode->GetComponent<MeshComponent>()) {
-            ImGui::Text("Mesh:");
-            ImGui::SameLine();
-            if (ImGui::SmallButton("Remove##mesh")) {
-                selectedNode->RemoveComponent<MeshComponent>();
-            } else {
-                ImGui::Indent();
-                ImGui::BulletText("Vertices: %zu", mesh->GetVertexCount());
-                ImGui::BulletText("Indices: %zu", mesh->GetIndexCount());
-                ImGui::BulletText("Triangles: %zu", mesh->GetIndexCount() / 3);
-                ImGui::Unindent();
-            }
-        }
-
-        if (auto* materialComp = selectedNode->GetComponent<MaterialComponent>()) {
-            ImGui::Spacing();
-            ImGui::Text("Material:");
-            ImGui::SameLine();
-            if (ImGui::SmallButton("Remove##material")) {
-                selectedNode->RemoveComponent<MaterialComponent>();
-            } else {
-                ImGui::Indent();
-                if (const auto& mat = materialComp->material) {
-                    auto shader = mat->GetShader();
-                    ImGui::BulletText("Shader: %s", shader ? shader->GetName().c_str() : "None");
-                    ImGui::BulletText("Base Color: (%.2f, %.2f, %.2f, %.2f)",
-                        mat->baseColor.r, mat->baseColor.g, mat->baseColor.b, mat->baseColor.a);
-                    ImGui::BulletText("Albedo Texture: %s", mat->albedo ? "Yes" : "No");
-                    if (mat->albedo) {
-                        ImGui::Indent();
-                        ImGui::BulletText("%dx%d", mat->albedo->GetWidth(), mat->albedo->GetHeight());
-                        ImGui::Unindent();
-                    }
-                    ImGui::BulletText("Normal Texture: %s", mat->normal ? "Yes" : "No");
-                    ImGui::BulletText("MetallicRoughness Texture: %s", mat->metallicRoughness ? "Yes" : "No");
-                    ImGui::SliderFloat("Metallic##material", &mat->metallicFactor, 0.0f, 1.0f);
-                    ImGui::SliderFloat("Roughness##material", &mat->roughnessFactor, 0.0f, 1.0f);
-                } else {
-                    ImGui::BulletText("No material resource");
-                }
-                ImGui::Unindent();
-            }
-        }
-
-        if (auto* camera = selectedNode->GetComponent<CameraComponent>()) {
-            ImGui::Spacing();
-            ImGui::Text("Camera:");
-            ImGui::SameLine();
-            if (ImGui::SmallButton("Remove##camera")) {
-                if (activeScene) {
-                    activeScene->UnregisterCamera(selectedNode);
-                }
-                selectedNode->RemoveComponent<CameraComponent>();
-            } else {
-                ImGui::Indent();
-                ImGui::BulletText("FOV: %.1f", camera->fov);
-                ImGui::BulletText("Yaw/Pitch: %.1f / %.1f", camera->yaw, camera->pitch);
-                ImGui::BulletText("Near/Far: %.2f / %.2f", camera->nearPlane, camera->farPlane);
-                ImGui::Unindent();
-            }
-        }
-
-        if (auto* light = selectedNode->GetComponent<LightComponent>()) {
-            const char* typeName = light->type == LightType::Directional ? "Directional"
-                                  : light->type == LightType::Point ? "Point" : "Spot";
-
-            ImGui::Spacing();
-            ImGui::Text("Light (%s):", typeName);
-            ImGui::SameLine();
-            if (ImGui::SmallButton("Remove##light")) {
-                if (activeScene) {
-                    activeScene->UnregisterLight(selectedNode);
-                }
-                selectedNode->RemoveComponent<LightComponent>();
-            } else {
-                ImGui::Indent();
-                ImGui::ColorEdit3("Color##light", &light->color.x);
-                ImGui::DragFloat("Intensity##light", &light->intensity, 0.05f, 0.0f, 100.0f);
-                if (light->type != LightType::Directional) {
-                    ImGui::DragFloat("Range##light", &light->range, 0.1f, 0.01f, 1000.0f);
-                }
-                if (light->type == LightType::Spot) {
-                    ImGui::DragFloat("Inner Cone##light", &light->innerConeDegrees, 0.5f, 0.0f, light->outerConeDegrees - 0.1f);
-                    ImGui::DragFloat("Outer Cone##light", &light->outerConeDegrees, 0.5f, light->innerConeDegrees + 0.1f, 89.0f);
-                }
-                ImGui::Checkbox("Casts Shadow##light", &light->castsShadow);
-                ImGui::Unindent();
-            }
-        }
-
-        ImGui::Spacing();
-        ImGui::Text("Hierarchy:");
-        ImGui::Separator();
-        ImGui::BulletText("Parent: %s", selectedNode->parent ? (selectedNode->parent->name.empty() ? "Root" : selectedNode->parent->name.c_str()) : "None");
-        ImGui::BulletText("Children: %zu", selectedNode->children.size());
-        if (!selectedNode->children.empty()) {
+        if (ImGui::CollapsingHeader("Gizmo", ImGuiTreeNodeFlags_DefaultOpen)) {
             ImGui::Indent();
-            for (TNode* child : selectedNode->children) {
-                ImGui::BulletText("%s", child->name.empty() ? "Unnamed" : child->name.c_str());
-            }
+
+            ImGui::TextDisabled("Mode");
+            if (ImGui::RadioButton("Move (W)", gizmoMode == GizmoMode::Move)) gizmoMode = GizmoMode::Move;
+            ImGui::SameLine();
+            if (ImGui::RadioButton("Rotate (E)", gizmoMode == GizmoMode::Rotate)) gizmoMode = GizmoMode::Rotate;
+            ImGui::SameLine();
+            if (ImGui::RadioButton("Scale (R)", gizmoMode == GizmoMode::Scale)) gizmoMode = GizmoMode::Scale;
+
+            ImGui::Spacing();
+            ImGui::TextDisabled("Space");
+            if (ImGui::RadioButton("Global", gizmoSpace == GizmoSpace::Global)) gizmoSpace = GizmoSpace::Global;
+            ImGui::SameLine();
+            if (ImGui::RadioButton("Local", gizmoSpace == GizmoSpace::Local)) gizmoSpace = GizmoSpace::Local;
+
+            ImGui::Spacing();
+            ImGui::TextDisabled("Hold Ctrl while dragging to snap");
+
             ImGui::Unindent();
         }
 
-        ImGui::Spacing();
-        ImGui::Text("Global Position: (%.2f, %.2f, %.2f)",
-            selectedNode->getGlobalPosition().x,
-            selectedNode->getGlobalPosition().y,
-            selectedNode->getGlobalPosition().z);
+        if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::Indent();
+
+            ImGui::DragFloat3("Position##inspector", &selectedNode->transform.position.x, 0.1f);
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Reset##pos")) selectedNode->transform.position = glm::vec3(0.0f);
+
+            ImGui::DragFloat3("Rotation##inspector", &selectedNode->transform.rotation.x, 1.0f);
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Reset##rot")) selectedNode->transform.rotation = glm::vec3(0.0f);
+
+            {
+                glm::vec3 beforeScale = selectedNode->transform.scale;
+                if (ImGui::DragFloat3("Scale##inspector", &selectedNode->transform.scale.x, 0.1f)) {
+                    glm::vec3 afterScale = selectedNode->transform.scale;
+                    for (int axis = 0; axis < 3; ++axis) {
+                        if (!scaleAxisLocked[axis]) continue;
+                        float delta = afterScale[axis] - beforeScale[axis];
+                        if (delta == 0.0f) continue;
+                        for (int other = 0; other < 3; ++other) {
+                            if (other != axis && scaleAxisLocked[other]) {
+                                selectedNode->transform.scale[other] = beforeScale[other] + delta;
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Reset##scale")) selectedNode->transform.scale = glm::vec3(1.0f);
+
+            ImGui::TextDisabled("Scale Lock");
+            ImGui::SameLine();
+            ImGui::Checkbox("X##scaleLockX", &scaleAxisLocked[0]);
+            ImGui::SameLine();
+            ImGui::Checkbox("Y##scaleLockY", &scaleAxisLocked[1]);
+            ImGui::SameLine();
+            ImGui::Checkbox("Z##scaleLockZ", &scaleAxisLocked[2]);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Check 2 or more axes to scale them together");
+            }
+
+            ImGui::Spacing();
+            if (ImGui::SmallButton("Reset Transform")) {
+                selectedNode->transform.position = glm::vec3(0.0f);
+                selectedNode->transform.rotation = glm::vec3(0.0f);
+                selectedNode->transform.scale = glm::vec3(1.0f);
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Copy Transform")) {
+                copiedTransform = selectedNode->transform;
+                hasCopiedTransform = true;
+            }
+            ImGui::SameLine();
+            ImGui::BeginDisabled(!hasCopiedTransform);
+            if (ImGui::SmallButton("Paste Transform")) {
+                selectedNode->transform = copiedTransform;
+            }
+            ImGui::EndDisabled();
+
+            if (auto* meshForPivot = selectedNode->GetComponent<MeshComponent>()) {
+                if (ImGui::SmallButton("Recenter Pivot")) {
+                    glm::vec3 localShift = meshForPivot->RecenterPivot();
+                    glm::vec3 rotatedScaledShift = glm::vec3(selectedNode->transform.getModelMatrix() * glm::vec4(localShift, 0.0f));
+                    selectedNode->transform.position += rotatedScaledShift;
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Moves this node's origin to the center of its mesh bounds,\nwithout visually moving the geometry.");
+                }
+            }
+
+            ImGui::Spacing();
+            ImGui::TextDisabled("Global Position: (%.2f, %.2f, %.2f)",
+                selectedNode->getGlobalPosition().x,
+                selectedNode->getGlobalPosition().y,
+                selectedNode->getGlobalPosition().z);
+
+            ImGui::Unindent();
+        }
+
+        if (ImGui::CollapsingHeader("Components", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::Indent();
+
+            if (selectedNode->components.empty()) {
+                ImGui::BulletText("No components (Group Node)");
+            }
+
+            if (auto* mesh = selectedNode->GetComponent<MeshComponent>()) {
+                ImGui::Text("Mesh:");
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Remove##mesh")) {
+                    selectedNode->RemoveComponent<MeshComponent>();
+                } else {
+                    ImGui::Indent();
+                    ImGui::BulletText("Vertices: %zu", mesh->GetVertexCount());
+                    ImGui::BulletText("Indices: %zu", mesh->GetIndexCount());
+                    ImGui::BulletText("Triangles: %zu", mesh->GetIndexCount() / 3);
+                    ImGui::Unindent();
+                }
+            }
+
+            if (auto* materialComp = selectedNode->GetComponent<MaterialComponent>()) {
+                ImGui::Spacing();
+                ImGui::Text("Material:");
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Remove##material")) {
+                    selectedNode->RemoveComponent<MaterialComponent>();
+                } else {
+                    ImGui::Indent();
+                    if (const auto& mat = materialComp->material) {
+                        auto shader = mat->GetShader();
+                        ImGui::BulletText("Shader: %s", shader ? shader->GetName().c_str() : "None");
+                        ImGui::BulletText("Base Color: (%.2f, %.2f, %.2f, %.2f)",
+                            mat->baseColor.r, mat->baseColor.g, mat->baseColor.b, mat->baseColor.a);
+                        ImGui::BulletText("Albedo Texture: %s", mat->albedo ? "Yes" : "No");
+                        if (mat->albedo) {
+                            ImGui::Indent();
+                            ImGui::BulletText("%dx%d", mat->albedo->GetWidth(), mat->albedo->GetHeight());
+                            ImGui::Unindent();
+                        }
+                        ImGui::BulletText("Normal Texture: %s", mat->normal ? "Yes" : "No");
+                        ImGui::BulletText("MetallicRoughness Texture: %s", mat->metallicRoughness ? "Yes" : "No");
+                        ImGui::SliderFloat("Metallic##material", &mat->metallicFactor, 0.0f, 1.0f);
+                        ImGui::SliderFloat("Roughness##material", &mat->roughnessFactor, 0.0f, 1.0f);
+                    } else {
+                        ImGui::BulletText("No material resource");
+                    }
+                    ImGui::Unindent();
+                }
+            }
+
+            if (auto* camera = selectedNode->GetComponent<CameraComponent>()) {
+                ImGui::Spacing();
+                ImGui::Text("Camera:");
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Remove##camera")) {
+                    if (activeScene) {
+                        activeScene->UnregisterCamera(selectedNode);
+                    }
+                    selectedNode->RemoveComponent<CameraComponent>();
+                } else {
+                    ImGui::Indent();
+                    ImGui::BulletText("FOV: %.1f", camera->fov);
+                    ImGui::BulletText("Yaw/Pitch: %.1f / %.1f", camera->yaw, camera->pitch);
+                    ImGui::BulletText("Near/Far: %.2f / %.2f", camera->nearPlane, camera->farPlane);
+                    ImGui::Unindent();
+                }
+            }
+
+            if (auto* light = selectedNode->GetComponent<LightComponent>()) {
+                const char* typeName = light->type == LightType::Directional ? "Directional"
+                                      : light->type == LightType::Point ? "Point" : "Spot";
+
+                ImGui::Spacing();
+                ImGui::Text("Light (%s):", typeName);
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Remove##light")) {
+                    if (activeScene) {
+                        activeScene->UnregisterLight(selectedNode);
+                    }
+                    selectedNode->RemoveComponent<LightComponent>();
+                } else {
+                    ImGui::Indent();
+                    ImGui::ColorEdit3("Color##light", &light->color.x);
+                    ImGui::DragFloat("Intensity##light", &light->intensity, 0.05f, 0.0f, 100.0f);
+                    if (light->type != LightType::Directional) {
+                        ImGui::DragFloat("Range##light", &light->range, 0.1f, 0.01f, 1000.0f);
+                    }
+                    if (light->type == LightType::Spot) {
+                        ImGui::DragFloat("Inner Cone##light", &light->innerConeDegrees, 0.5f, 0.0f, light->outerConeDegrees - 0.1f);
+                        ImGui::DragFloat("Outer Cone##light", &light->outerConeDegrees, 0.5f, light->innerConeDegrees + 0.1f, 89.0f);
+                    }
+                    ImGui::Checkbox("Casts Shadow##light", &light->castsShadow);
+                    ImGui::Unindent();
+                }
+            }
+
+            ImGui::Unindent();
+        }
+
+        if (ImGui::CollapsingHeader("Hierarchy", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::Indent();
+
+            ImGui::BulletText("Parent: %s", selectedNode->parent ? (selectedNode->parent->name.empty() ? "Root" : selectedNode->parent->name.c_str()) : "None");
+            ImGui::BulletText("Children: %zu", selectedNode->children.size());
+            if (!selectedNode->children.empty()) {
+                ImGui::Indent();
+                for (TNode* child : selectedNode->children) {
+                    ImGui::BulletText("%s", child->name.empty() ? "Unnamed" : child->name.c_str());
+                }
+                ImGui::Unindent();
+            }
+
+            ImGui::Unindent();
+        }
     }
     ImGui::End();
 }
@@ -1668,6 +1692,27 @@ void DebugUI::DrawMultiDeleteConfirmation() {
     }
 }
 
+void DebugUI::UpdateAutoSave(SceneManager* sceneManager) {
+    if (!EngineSettings::IsAutoSaveEnabled() || !sceneManager) {
+        autoSaveTimer = 0.0f;
+        return;
+    }
+
+    autoSaveTimer += ImGui::GetIO().DeltaTime;
+    float interval = EngineSettings::GetAutoSaveIntervalSeconds();
+    if (interval <= 0.0f || autoSaveTimer < interval) return;
+
+    autoSaveTimer = 0.0f;
+
+    Scene* activeScene = sceneManager->GetActiveScene();
+    if (!activeScene) return;
+
+    std::filesystem::create_directories("scenes");
+    std::string fileName = "scenes/" + sceneManager->GetActiveSceneName() + "_autosave.scene";
+    SceneSerializer::SaveScene(activeScene, fileName);
+    lastAutoSaveStatus = "Auto-saved at " + std::to_string(static_cast<int>(ImGui::GetTime())) + "s";
+}
+
 void DebugUI::DrawCameraTab(SceneManager* sceneManager) {
     if (!sceneManager) return;
 
@@ -1795,6 +1840,8 @@ void DebugUI::DrawSceneSelector(SceneManager* sceneManager) {
             bool isSelected = (sceneManager->GetActiveSceneName() == name);
             if (ImGui::Selectable(name.c_str(), isSelected)) {
                 sceneManager->LoadScene(name);
+                EngineSettings::SetLastActiveScene(name);
+                EngineConfig::Save();
             }
             if (isSelected) {
                 ImGui::SetItemDefaultFocus();
@@ -1809,6 +1856,8 @@ void DebugUI::DrawSceneSelector(SceneManager* sceneManager) {
         std::string newSceneName = "Scene_" + std::to_string(sceneCounter++);
         sceneManager->CreateScene(newSceneName);
         sceneManager->LoadScene(newSceneName);
+        EngineSettings::SetLastActiveScene(newSceneName);
+        EngineConfig::Save();
     }
 
     ImGui::SameLine();
@@ -1827,6 +1876,49 @@ void DebugUI::DrawSceneSelector(SceneManager* sceneManager) {
             sceneToDelete = sceneManager->GetActiveSceneName();
             showDeleteConfirm = true;
             ImGui::OpenPopup("Delete Scene Confirmation");
+        }
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("Rename##btn")) {
+        if (sceneManager->GetActiveScene()) {
+            renamingScene = true;
+            sceneRenameError = "";
+            std::snprintf(sceneRenameBuffer, sizeof(sceneRenameBuffer), "%s", sceneManager->GetActiveSceneName().c_str());
+        }
+    }
+
+    if (renamingScene) {
+        ImGui::SetNextItemWidth(200);
+        bool commit = ImGui::InputText("##SceneRename", sceneRenameBuffer, sizeof(sceneRenameBuffer),
+            ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+
+        ImGui::SameLine();
+        bool confirmed = commit || ImGui::SmallButton("OK##sceneRename");
+        ImGui::SameLine();
+        bool cancelled = ImGui::SmallButton("Cancel##sceneRename");
+
+        if (confirmed) {
+            std::string newName = sceneRenameBuffer;
+            std::string oldName = sceneManager->GetActiveSceneName();
+            if (newName.empty()) {
+                sceneRenameError = "Name cannot be empty.";
+            } else if (newName != oldName && sceneManager->GetScene(newName)) {
+                sceneRenameError = "A scene with that name already exists.";
+            } else {
+                if (newName != oldName && sceneManager->RenameScene(oldName, newName)) {
+                    EngineSettings::SetLastActiveScene(newName);
+                    EngineConfig::Save();
+                }
+                renamingScene = false;
+            }
+        } else if (cancelled) {
+            renamingScene = false;
+            sceneRenameError = "";
+        }
+
+        if (!sceneRenameError.empty()) {
+            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", sceneRenameError.c_str());
         }
     }
 }

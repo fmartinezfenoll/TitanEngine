@@ -27,3 +27,6 @@ Thumbs.db
 # Local engine preferences (per-machine, regenerated on shutdown)
 /project/engine.ini
 imgui.ini
+
+# Auto-save backups (regenerated periodically, not real scene content)
+/project/scenes/*_autosave.scene

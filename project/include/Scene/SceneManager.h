@@ -19,6 +19,7 @@ public:
     void LoadScene(const std::string& name);
     void UnloadScene(const std::string& name);
     void UnloadAllScenes();
+    bool RenameScene(const std::string& oldName, const std::string& newName);
 
     const std::unordered_map<std::string, std::shared_ptr<Scene>>& GetAllScenes() const {
         return scenes;

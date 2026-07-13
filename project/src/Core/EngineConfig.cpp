@@ -87,6 +87,18 @@ void EngineConfig::Load(const std::string& path)
     if (it != values.end())
         EngineSettings::SetScaleSnap(std::stof(it->second));
 
+    it = values.find("AutoSave");
+    if (it != values.end())
+        EngineSettings::SetAutoSaveEnabled(ToBool(it->second, EngineSettings::IsAutoSaveEnabled()));
+
+    it = values.find("AutoSaveIntervalSeconds");
+    if (it != values.end())
+        EngineSettings::SetAutoSaveIntervalSeconds(std::stof(it->second));
+
+    it = values.find("LastActiveScene");
+    if (it != values.end())
+        EngineSettings::SetLastActiveScene(it->second);
+
     Log::Info("Loaded engine settings from " + path);
 }
 
@@ -109,4 +121,7 @@ void EngineConfig::Save(const std::string& path)
     file << "PositionSnap=" << EngineSettings::GetPositionSnap() << "\n";
     file << "RotationSnapDegrees=" << EngineSettings::GetRotationSnapDegrees() << "\n";
     file << "ScaleSnap=" << EngineSettings::GetScaleSnap() << "\n";
+    file << "AutoSave=" << (EngineSettings::IsAutoSaveEnabled() ? 1 : 0) << "\n";
+    file << "AutoSaveIntervalSeconds=" << EngineSettings::GetAutoSaveIntervalSeconds() << "\n";
+    file << "LastActiveScene=" << EngineSettings::GetLastActiveScene() << "\n";
 }

@@ -26,7 +26,6 @@ private:
     static std::string DescribeNode(TNode* node);
     static void DrawSceneTree(TNode* node, Scene* activeScene, int depth = 0);
     static void DrawResourcesTree();
-    static void DrawNodeProperties(TNode* node);
     static void DrawSceneSelector(SceneManager* sceneManager);
     static void DrawInspector(Scene* activeScene);
     static void DrawDeleteConfirmation();
@@ -48,6 +47,7 @@ private:
     static void ToggleNodeInMultiSelect(TNode* node);
     static bool IsMultiSelected(TNode* node);
     static void DrawMultiDeleteConfirmation();
+    static void UpdateAutoSave(SceneManager* sceneManager);
 
     static TNode* selectedNode;
     static bool sceneSelected;
@@ -86,5 +86,12 @@ private:
 
     static bool hasCopiedTransform;
     static Transform copiedTransform;
-    static bool uniformScaleLock;
+    static bool scaleAxisLocked[3]; // X, Y, Z -- when 2+ are checked, dragging any one of them drags the others by the same delta
+
+    static float autoSaveTimer;
+    static std::string lastAutoSaveStatus;
+
+    static bool renamingScene;
+    static char sceneRenameBuffer[128];
+    static std::string sceneRenameError;
 };
