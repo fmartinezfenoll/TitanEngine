@@ -31,7 +31,7 @@ public:
     void SetMat4(const std::string& name, const glm::mat4& value) const;
 
 private:
-    unsigned int m_ID;
+    unsigned int ID;
 
     unsigned int Compile(const std::string& source, GLenum type);
     void CheckErrors(unsigned int object, const std::string& type);
