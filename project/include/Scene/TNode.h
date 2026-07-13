@@ -8,12 +8,14 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <memory>
 #include "Scene/Component.h"
+#include "Scene/LightUniformData.h"
 
 // Forward declarations
 struct BoundingVolume;
 struct Frustum;
 class MeshComponent;
 class MaterialComponent;
+class OpenGLShader;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  STRUCT PLANE
@@ -38,7 +40,7 @@ struct Frustum {
     Plane topFace, bottomFace, rightFace, leftFace, farFace, nearFace;
     Frustum() = default;
 
-    void updateFromCamera(const class TNode* cameraNode, float aspect, float zNear, float zFar);
+    void updateFromCamera(const glm::mat4& viewProjection);
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -212,7 +214,11 @@ public:
         }
     }
 
-    void draw(const Frustum& frustum, const glm::mat4& parentMatrix = glm::mat4(1.0f));
+    void draw(const Frustum& frustum, const glm::mat4& view, const glm::mat4& projection,
+              const std::vector<LightUniformData>& lights, const ShadowRenderData& shadowData,
+              const glm::mat4& parentMatrix = glm::mat4(1.0f));
+
+    void drawDepthOnly(OpenGLShader* depthShader, const glm::mat4& parentMatrix = glm::mat4(1.0f));
 
     glm::mat4 getModelMatrix() const {
         if (parent) {

@@ -11,5 +11,5 @@ public:
     static void Shutdown();
 
 private:
-    static std::unique_ptr<IRenderer> s_Renderer;
+    static std::unique_ptr<IRenderer> Instance;
 };

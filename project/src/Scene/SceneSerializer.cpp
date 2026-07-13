@@ -395,3 +395,15 @@ Scene* SceneSerializer::LoadScene(const std::string& filePath) {
         return nullptr;
     }
 }
+
+TNode* SceneSerializer::DuplicateNode(const TNode* node, Scene* scene) {
+    if (!node) return nullptr;
+
+    try {
+        json j = SerializeNode(node);
+        return DeserializeNode(j, scene);
+    } catch (const std::exception& e) {
+        Log::Error(std::string("Error duplicating node: ") + e.what());
+        return nullptr;
+    }
+}

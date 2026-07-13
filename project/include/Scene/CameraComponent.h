@@ -26,5 +26,5 @@ public:
     glm::vec3 GetRight() const;
 
 private:
-    TNode* m_owner;
+    TNode* owner;
 };

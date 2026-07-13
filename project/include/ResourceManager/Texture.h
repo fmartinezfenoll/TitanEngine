@@ -15,17 +15,17 @@ public:
 
     void Bind(unsigned int slot = 0) const;
 
-    int GetWidth() const { return m_Width; }
-    int GetHeight() const { return m_Height; }
-    bool IsValid() const { return m_ID != 0; }
-    const std::string& GetFilePath() const { return m_FilePath; }
+    int GetWidth() const { return Width; }
+    int GetHeight() const { return Height; }
+    bool IsValid() const { return ID != 0; }
+    const std::string& GetFilePath() const { return FilePath; }
 
 private:
-    unsigned int m_ID = 0;
-    int m_Width = 0;
-    int m_Height = 0;
-    int m_Channels = 0;
-    std::string m_FilePath;
+    unsigned int ID = 0;
+    int Width = 0;
+    int Height = 0;
+    int Channels = 0;
+    std::string FilePath;
 
     void UploadFromMemory(const unsigned char* pixels);
 };

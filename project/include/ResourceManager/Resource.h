@@ -5,15 +5,15 @@ class Resource
 {
 public:
     explicit Resource(const std::string& name)
-        : m_Name(name) {}
+        : Name(name) {}
 
     virtual ~Resource() = default;
 
     const std::string& GetName() const
     {
-        return m_Name;
+        return Name;
     }
 
 protected:
-    std::string m_Name;
+    std::string Name;
 };

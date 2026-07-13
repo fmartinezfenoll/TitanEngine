@@ -14,17 +14,17 @@ public:
 
     Scene* CreateScene(const std::string& name);
     Scene* GetScene(const std::string& name);
-    Scene* GetActiveScene() { return m_activeScene; }
+    Scene* GetActiveScene() { return activeScene; }
 
     void LoadScene(const std::string& name);
     void UnloadScene(const std::string& name);
     void UnloadAllScenes();
 
     const std::unordered_map<std::string, std::shared_ptr<Scene>>& GetAllScenes() const {
-        return m_scenes;
+        return scenes;
     }
 
-    const std::string& GetActiveSceneName() const { return m_activeSceneName; }
+    const std::string& GetActiveSceneName() const { return activeSceneName; }
 
     bool SaveSceneToFile(const std::string& sceneName, const std::string& filePath);
     Scene* LoadSceneFromFile(const std::string& filePath);
@@ -34,7 +34,7 @@ private:
     SceneManager() = default;
     ~SceneManager();
 
-    std::unordered_map<std::string, std::shared_ptr<Scene>> m_scenes;
-    Scene* m_activeScene = nullptr;
-    std::string m_activeSceneName;
+    std::unordered_map<std::string, std::shared_ptr<Scene>> scenes;
+    Scene* activeScene = nullptr;
+    std::string activeSceneName;
 };

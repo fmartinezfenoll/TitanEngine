@@ -13,6 +13,7 @@ public:
                                 const glm::mat4& view, const glm::mat4& projection);
     static void DrawSelectionBox(const glm::vec3& worldCenter, const glm::vec3& worldExtents,
                                  const glm::mat4& view, const glm::mat4& projection);
+    static void DrawGrid(const glm::mat4& view, const glm::mat4& projection);
 
     static void DrawMoveGizmo(const glm::vec3& worldPos, const glm::mat4& baseRotation, float scale,
                               const glm::mat4& view, const glm::mat4& projection);
@@ -30,29 +31,37 @@ public:
     static constexpr float kGizmoRingRadius = 1.0f;
     static constexpr float kGizmoPickTolerance = 0.12f;
     static constexpr float kGizmoScreenScaleFactor = 0.15f;
+    static constexpr float kGizmoCenterCubeSize = 0.18f;
+
+    static constexpr int kGridHalfSize = 20;
+    static constexpr float kGridSpacing = 1.0f;
 
 private:
-    static inline unsigned int s_SphereVAO = 0;
-    static inline unsigned int s_SphereVBO = 0;
-    static inline int s_SphereVertexCount = 0;
+    static inline unsigned int SphereVAO = 0;
+    static inline unsigned int SphereVBO = 0;
+    static inline int SphereVertexCount = 0;
 
-    static inline unsigned int s_FrustumVAO = 0;
-    static inline unsigned int s_FrustumVBO = 0;
-    static inline int s_FrustumVertexCount = 0;
+    static inline unsigned int FrustumVAO = 0;
+    static inline unsigned int FrustumVBO = 0;
+    static inline int FrustumVertexCount = 0;
 
-    static inline unsigned int s_CubeVAO = 0;
-    static inline unsigned int s_CubeVBO = 0;
-    static inline int s_CubeVertexCount = 0;
+    static inline unsigned int CubeVAO = 0;
+    static inline unsigned int CubeVBO = 0;
+    static inline int CubeVertexCount = 0;
 
-    static inline unsigned int s_ArrowVAO = 0;
-    static inline unsigned int s_ArrowVBO = 0;
-    static inline int s_ArrowVertexCount = 0;
+    static inline unsigned int ArrowVAO = 0;
+    static inline unsigned int ArrowVBO = 0;
+    static inline int ArrowVertexCount = 0;
 
-    static inline unsigned int s_RingVAO = 0;
-    static inline unsigned int s_RingVBO = 0;
-    static inline int s_RingVertexCount = 0;
+    static inline unsigned int RingVAO = 0;
+    static inline unsigned int RingVBO = 0;
+    static inline int RingVertexCount = 0;
 
-    static inline unsigned int s_ShaftVAO = 0;
-    static inline unsigned int s_ShaftVBO = 0;
-    static inline int s_ShaftVertexCount = 0;
+    static inline unsigned int ShaftVAO = 0;
+    static inline unsigned int ShaftVBO = 0;
+    static inline int ShaftVertexCount = 0;
+
+    static inline unsigned int GridVAO = 0;
+    static inline unsigned int GridVBO = 0;
+    static inline int GridVertexCount = 0;
 };

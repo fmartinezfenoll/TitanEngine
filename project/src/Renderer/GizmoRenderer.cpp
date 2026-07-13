@@ -131,6 +131,25 @@ std::vector<glm::vec3> BuildWireCircle(float radius, int segments)
     return lines;
 }
 
+std::vector<glm::vec3> BuildGrid(int halfSize, float spacing)
+{
+    // Lines parallel to X and Z, in the Y=0 plane, excluding the two center
+    // axis lines (those are drawn separately in axis colors by DrawGrid).
+    std::vector<glm::vec3> lines;
+    float extent = halfSize * spacing;
+
+    for (int i = -halfSize; i <= halfSize; ++i) {
+        if (i == 0) continue;
+        float offset = i * spacing;
+        lines.push_back({ -extent, 0.0f, offset });
+        lines.push_back({  extent, 0.0f, offset });
+        lines.push_back({ offset, 0.0f, -extent });
+        lines.push_back({ offset, 0.0f,  extent });
+    }
+
+    return lines;
+}
+
 unsigned int UploadLineVAO(const std::vector<glm::vec3>& vertices, unsigned int& outVBO)
 {
     unsigned int vao = 0;
@@ -155,44 +174,50 @@ void GizmoRenderer::Init()
     ResourceManager::LoadShader("gizmo");
 
     auto sphereVerts = BuildWireSphere(kLightGizmoRadius, 24);
-    s_SphereVAO = UploadLineVAO(sphereVerts, s_SphereVBO);
-    s_SphereVertexCount = static_cast<int>(sphereVerts.size());
+    SphereVAO = UploadLineVAO(sphereVerts, SphereVBO);
+    SphereVertexCount = static_cast<int>(sphereVerts.size());
 
     auto frustumVerts = BuildWireFrustum(kCameraGizmoRadius);
-    s_FrustumVAO = UploadLineVAO(frustumVerts, s_FrustumVBO);
-    s_FrustumVertexCount = static_cast<int>(frustumVerts.size());
+    FrustumVAO = UploadLineVAO(frustumVerts, FrustumVBO);
+    FrustumVertexCount = static_cast<int>(frustumVerts.size());
 
     auto cubeVerts = BuildWireCube();
-    s_CubeVAO = UploadLineVAO(cubeVerts, s_CubeVBO);
-    s_CubeVertexCount = static_cast<int>(cubeVerts.size());
+    CubeVAO = UploadLineVAO(cubeVerts, CubeVBO);
+    CubeVertexCount = static_cast<int>(cubeVerts.size());
 
     auto arrowVerts = BuildWireArrow(kGizmoArmLength);
-    s_ArrowVAO = UploadLineVAO(arrowVerts, s_ArrowVBO);
-    s_ArrowVertexCount = static_cast<int>(arrowVerts.size());
+    ArrowVAO = UploadLineVAO(arrowVerts, ArrowVBO);
+    ArrowVertexCount = static_cast<int>(arrowVerts.size());
+
+    auto gridVerts = BuildGrid(kGridHalfSize, kGridSpacing);
+    GridVAO = UploadLineVAO(gridVerts, GridVBO);
+    GridVertexCount = static_cast<int>(gridVerts.size());
 
     auto ringVerts = BuildWireCircle(kGizmoRingRadius, 32);
-    s_RingVAO = UploadLineVAO(ringVerts, s_RingVBO);
-    s_RingVertexCount = static_cast<int>(ringVerts.size());
+    RingVAO = UploadLineVAO(ringVerts, RingVBO);
+    RingVertexCount = static_cast<int>(ringVerts.size());
 
     auto shaftVerts = BuildWireShaft(kGizmoArmLength);
-    s_ShaftVAO = UploadLineVAO(shaftVerts, s_ShaftVBO);
-    s_ShaftVertexCount = static_cast<int>(shaftVerts.size());
+    ShaftVAO = UploadLineVAO(shaftVerts, ShaftVBO);
+    ShaftVertexCount = static_cast<int>(shaftVerts.size());
 }
 
 void GizmoRenderer::Shutdown()
 {
-    glDeleteVertexArrays(1, &s_SphereVAO);
-    glDeleteBuffers(1, &s_SphereVBO);
-    glDeleteVertexArrays(1, &s_FrustumVAO);
-    glDeleteBuffers(1, &s_FrustumVBO);
-    glDeleteVertexArrays(1, &s_CubeVAO);
-    glDeleteBuffers(1, &s_CubeVBO);
-    glDeleteVertexArrays(1, &s_ArrowVAO);
-    glDeleteBuffers(1, &s_ArrowVBO);
-    glDeleteVertexArrays(1, &s_RingVAO);
-    glDeleteBuffers(1, &s_RingVBO);
-    glDeleteVertexArrays(1, &s_ShaftVAO);
-    glDeleteBuffers(1, &s_ShaftVBO);
+    glDeleteVertexArrays(1, &SphereVAO);
+    glDeleteBuffers(1, &SphereVBO);
+    glDeleteVertexArrays(1, &FrustumVAO);
+    glDeleteBuffers(1, &FrustumVBO);
+    glDeleteVertexArrays(1, &CubeVAO);
+    glDeleteBuffers(1, &CubeVBO);
+    glDeleteVertexArrays(1, &ArrowVAO);
+    glDeleteBuffers(1, &ArrowVBO);
+    glDeleteVertexArrays(1, &RingVAO);
+    glDeleteBuffers(1, &RingVBO);
+    glDeleteVertexArrays(1, &ShaftVAO);
+    glDeleteBuffers(1, &ShaftVBO);
+    glDeleteVertexArrays(1, &GridVAO);
+    glDeleteBuffers(1, &GridVBO);
 }
 
 void GizmoRenderer::DrawLightGizmo(const glm::vec3& worldPos, const glm::vec3& color,
@@ -209,8 +234,8 @@ void GizmoRenderer::DrawLightGizmo(const glm::vec3& worldPos, const glm::vec3& c
     shader->SetMat4("projection", projection);
     shader->SetVec3("color", color);
 
-    glBindVertexArray(s_SphereVAO);
-    glDrawArrays(GL_LINES, 0, s_SphereVertexCount);
+    glBindVertexArray(SphereVAO);
+    glDrawArrays(GL_LINES, 0, SphereVertexCount);
 }
 
 void GizmoRenderer::DrawCameraGizmo(const glm::mat4& cameraModelMatrix,
@@ -225,8 +250,8 @@ void GizmoRenderer::DrawCameraGizmo(const glm::mat4& cameraModelMatrix,
     shader->SetMat4("projection", projection);
     shader->SetVec3("color", glm::vec3(0.9f, 0.9f, 0.2f));
 
-    glBindVertexArray(s_FrustumVAO);
-    glDrawArrays(GL_LINES, 0, s_FrustumVertexCount);
+    glBindVertexArray(FrustumVAO);
+    glDrawArrays(GL_LINES, 0, FrustumVertexCount);
 }
 
 void GizmoRenderer::DrawSelectionBox(const glm::vec3& worldCenter, const glm::vec3& worldExtents,
@@ -244,8 +269,8 @@ void GizmoRenderer::DrawSelectionBox(const glm::vec3& worldCenter, const glm::ve
     shader->SetMat4("projection", projection);
     shader->SetVec3("color", glm::vec3(1.0f, 0.6f, 0.1f));
 
-    glBindVertexArray(s_CubeVAO);
-    glDrawArrays(GL_LINES, 0, s_CubeVertexCount);
+    glBindVertexArray(CubeVAO);
+    glDrawArrays(GL_LINES, 0, CubeVertexCount);
 }
 
 float GizmoRenderer::ComputeGizmoScale(const glm::vec3& worldPos, const glm::vec3& cameraWorldPos)
@@ -289,12 +314,12 @@ void GizmoRenderer::DrawMoveGizmo(const glm::vec3& worldPos, const glm::mat4& ba
 
     glm::mat4 base = glm::translate(glm::mat4(1.0f), worldPos) * baseRotation * glm::scale(glm::mat4(1.0f), glm::vec3(scale));
 
-    glBindVertexArray(s_ArrowVAO);
+    glBindVertexArray(ArrowVAO);
     for (int axis = 0; axis < 3; ++axis) {
         glm::mat4 model = base * AxisRotation(axis);
         shader->SetMat4("model", model);
         shader->SetVec3("color", AxisColor(axis));
-        glDrawArrays(GL_LINES, 0, s_ArrowVertexCount);
+        glDrawArrays(GL_LINES, 0, ArrowVertexCount);
     }
 }
 
@@ -312,7 +337,7 @@ void GizmoRenderer::DrawRotateGizmo(const glm::vec3& worldPos, const glm::mat4& 
 
     // Ring is built in the XY plane, which rotates *around* Z -- rotate the
     // template so ring[axis] lies in the plane perpendicular to that axis.
-    glBindVertexArray(s_RingVAO);
+    glBindVertexArray(RingVAO);
     for (int axis = 0; axis < 3; ++axis) {
         glm::mat4 ringOrient;
         switch (axis) {
@@ -323,7 +348,7 @@ void GizmoRenderer::DrawRotateGizmo(const glm::vec3& worldPos, const glm::mat4& 
         glm::mat4 model = base * ringOrient;
         shader->SetMat4("model", model);
         shader->SetVec3("color", AxisColor(axis));
-        glDrawArrays(GL_LINES, 0, s_RingVertexCount);
+        glDrawArrays(GL_LINES, 0, RingVertexCount);
     }
 }
 
@@ -349,13 +374,53 @@ void GizmoRenderer::DrawScaleGizmo(const glm::vec3& worldPos, const glm::mat4& b
         glm::mat4 shaftModel = axisBase * glm::scale(glm::mat4(1.0f), glm::vec3(armLength));
         shader->SetMat4("model", shaftModel);
         shader->SetVec3("color", color);
-        glBindVertexArray(s_ShaftVAO);
-        glDrawArrays(GL_LINES, 0, s_ShaftVertexCount);
+        glBindVertexArray(ShaftVAO);
+        glDrawArrays(GL_LINES, 0, ShaftVertexCount);
 
         glm::mat4 tipModel = axisBase * glm::translate(glm::mat4(1.0f), glm::vec3(armLength, 0.0f, 0.0f))
                               * glm::scale(glm::mat4(1.0f), glm::vec3(tipCubeSize));
         shader->SetMat4("model", tipModel);
-        glBindVertexArray(s_CubeVAO);
-        glDrawArrays(GL_LINES, 0, s_CubeVertexCount);
+        glBindVertexArray(CubeVAO);
+        glDrawArrays(GL_LINES, 0, CubeVertexCount);
     }
+
+    glm::mat4 centerModel = base * glm::scale(glm::mat4(1.0f), glm::vec3(kGizmoCenterCubeSize));
+    shader->SetMat4("model", centerModel);
+    shader->SetVec3("color", glm::vec3(0.9f, 0.9f, 0.9f));
+    glBindVertexArray(CubeVAO);
+    glDrawArrays(GL_LINES, 0, CubeVertexCount);
+}
+
+void GizmoRenderer::DrawGrid(const glm::mat4& view, const glm::mat4& projection)
+{
+    auto shader = ResourceManager::GetShader("gizmo");
+    if (!shader) return;
+
+    shader->Bind();
+    shader->SetMat4("model", glm::mat4(1.0f));
+    shader->SetMat4("view", view);
+    shader->SetMat4("projection", projection);
+
+    // Regular grid lines, dim gray.
+    shader->SetVec3("color", glm::vec3(0.35f, 0.35f, 0.35f));
+    glBindVertexArray(GridVAO);
+    glDrawArrays(GL_LINES, 0, GridVertexCount);
+
+    // Center X axis (red), reusing the shaft template scaled to span the grid.
+    float extent = kGridHalfSize * kGridSpacing;
+    glm::mat4 xModel = glm::translate(glm::mat4(1.0f), glm::vec3(-extent, 0.0f, 0.0f))
+                        * glm::scale(glm::mat4(1.0f), glm::vec3(extent * 2.0f));
+    shader->SetMat4("model", xModel);
+    shader->SetVec3("color", glm::vec3(0.75f, 0.25f, 0.25f));
+    glBindVertexArray(ShaftVAO);
+    glDrawArrays(GL_LINES, 0, ShaftVertexCount);
+
+    // Center Z axis (blue).
+    glm::mat4 zModel = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -extent))
+                        * glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(0.0f, 1.0f, 0.0f))
+                        * glm::scale(glm::mat4(1.0f), glm::vec3(extent * 2.0f));
+    shader->SetMat4("model", zModel);
+    shader->SetVec3("color", glm::vec3(0.25f, 0.25f, 0.75f));
+    glBindVertexArray(ShaftVAO);
+    glDrawArrays(GL_LINES, 0, ShaftVertexCount);
 }

@@ -3,8 +3,8 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
 
-CameraComponent::CameraComponent(TNode* owner)
-    : m_owner(owner)
+CameraComponent::CameraComponent(TNode* ownerNode)
+    : owner(ownerNode)
 {
 }
 
@@ -24,7 +24,7 @@ glm::vec3 CameraComponent::GetRight() const
 
 glm::mat4 CameraComponent::GetViewMatrix() const
 {
-    glm::vec3 position = m_owner ? m_owner->transform.position : glm::vec3(0.0f);
+    glm::vec3 position = owner ? owner->transform.position : glm::vec3(0.0f);
     return glm::lookAt(position, position + GetForward(), glm::vec3(0.0f, 1.0f, 0.0f));
 }
 
@@ -35,7 +35,7 @@ glm::mat4 CameraComponent::GetProjectionMatrix(float aspectRatio) const
 
 void CameraComponent::ProcessKeyboard(const glm::vec3& moveDir, float deltaTime)
 {
-    if (!m_owner) return;
+    if (!owner) return;
 
     glm::vec3 forward = GetForward();
     glm::vec3 right = GetRight();
@@ -45,7 +45,7 @@ void CameraComponent::ProcessKeyboard(const glm::vec3& moveDir, float deltaTime)
     if (glm::length(delta) > 0.0f)
         delta = glm::normalize(delta);
 
-    m_owner->transform.position += delta * moveSpeed * deltaTime;
+    owner->transform.position += delta * moveSpeed * deltaTime;
 }
 
 void CameraComponent::ProcessMouseLook(float xOffset, float yOffset)

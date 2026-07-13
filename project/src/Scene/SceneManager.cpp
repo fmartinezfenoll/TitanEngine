@@ -9,25 +9,25 @@ SceneManager::~SceneManager() {
 }
 
 Scene* SceneManager::CreateScene(const std::string& name) {
-    if (m_scenes.find(name) != m_scenes.end()) {
-        return m_scenes[name].get();
+    if (scenes.find(name) != scenes.end()) {
+        return scenes[name].get();
     }
 
     auto scene = std::make_shared<Scene>();
     scene->Init();
-    m_scenes[name] = scene;
+    scenes[name] = scene;
 
-    if (!m_activeScene) {
-        m_activeScene = scene.get();
-        m_activeSceneName = name;
+    if (!activeScene) {
+        activeScene = scene.get();
+        activeSceneName = name;
     }
 
     return scene.get();
 }
 
 Scene* SceneManager::GetScene(const std::string& name) {
-    auto it = m_scenes.find(name);
-    if (it != m_scenes.end()) {
+    auto it = scenes.find(name);
+    if (it != scenes.end()) {
         return it->second.get();
     }
     return nullptr;
@@ -36,29 +36,29 @@ Scene* SceneManager::GetScene(const std::string& name) {
 void SceneManager::LoadScene(const std::string& name) {
     Scene* scene = GetScene(name);
     if (scene) {
-        m_activeScene = scene;
-        m_activeSceneName = name;
+        activeScene = scene;
+        activeSceneName = name;
     }
 }
 
 void SceneManager::UnloadScene(const std::string& name) {
-    auto it = m_scenes.find(name);
-    if (it != m_scenes.end()) {
-        if (m_activeScene == it->second.get()) {
-            m_activeScene = nullptr;
-            m_activeSceneName = "";
+    auto it = scenes.find(name);
+    if (it != scenes.end()) {
+        if (activeScene == it->second.get()) {
+            activeScene = nullptr;
+            activeSceneName = "";
 
             // Switch to another scene if available
-            if (!m_scenes.empty()) {
-                auto nextIt = m_scenes.begin();
-                if (nextIt->first == name && std::next(nextIt) != m_scenes.end()) {
+            if (!scenes.empty()) {
+                auto nextIt = scenes.begin();
+                if (nextIt->first == name && std::next(nextIt) != scenes.end()) {
                     nextIt = std::next(nextIt);
                 }
-                m_activeScene = nextIt->second.get();
-                m_activeSceneName = nextIt->first;
+                activeScene = nextIt->second.get();
+                activeSceneName = nextIt->first;
             }
         }
-        m_scenes.erase(it);
+        scenes.erase(it);
 
         // Delete the scene file
         std::string filePath = "scenes/" + name + ".scene";
@@ -70,9 +70,9 @@ void SceneManager::UnloadScene(const std::string& name) {
 }
 
 void SceneManager::UnloadAllScenes() {
-    m_scenes.clear();
-    m_activeScene = nullptr;
-    m_activeSceneName = "";
+    scenes.clear();
+    activeScene = nullptr;
+    activeSceneName = "";
 }
 
 bool SceneManager::SaveSceneToFile(const std::string& sceneName, const std::string& filePath) {
@@ -94,11 +94,11 @@ Scene* SceneManager::LoadSceneFromFile(const std::string& filePath) {
 
     auto scene_ptr = std::make_shared<Scene>();
     scene_ptr.reset(scene);
-    m_scenes[sceneName] = scene_ptr;
+    scenes[sceneName] = scene_ptr;
 
-    if (!m_activeScene) {
-        m_activeScene = scene;
-        m_activeSceneName = sceneName;
+    if (!activeScene) {
+        activeScene = scene;
+        activeSceneName = sceneName;
     }
 
     return scene;
@@ -120,11 +120,11 @@ void SceneManager::LoadAllScenesFromDirectory(const std::string& directory) {
                 scene->Init();
                 auto scene_ptr = std::make_shared<Scene>();
                 scene_ptr.reset(scene);
-                m_scenes[sceneName] = scene_ptr;
+                scenes[sceneName] = scene_ptr;
 
-                if (!m_activeScene) {
-                    m_activeScene = scene;
-                    m_activeSceneName = sceneName;
+                if (!activeScene) {
+                    activeScene = scene;
+                    activeSceneName = sceneName;
                 }
             }
         }

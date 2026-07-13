@@ -17,7 +17,7 @@ public:
 
     void Bind() const;
 
-    std::shared_ptr<OpenGLShader> GetShader() const { return m_shader; }
+    std::shared_ptr<OpenGLShader> GetShader() const { return shader; }
 
     std::shared_ptr<Texture> albedo;
     std::shared_ptr<Texture> normal;
@@ -25,5 +25,5 @@ public:
     glm::vec4 baseColor{1.0f};
 
 private:
-    std::shared_ptr<OpenGLShader> m_shader;
+    std::shared_ptr<OpenGLShader> shader;
 };

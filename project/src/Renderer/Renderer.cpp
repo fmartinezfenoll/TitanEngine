@@ -3,27 +3,27 @@
 #include "Renderer/IRenderer.h" 
 #include <iostream>
 
-std::unique_ptr<IRenderer> Renderer::s_Renderer;
+std::unique_ptr<IRenderer> Renderer::Instance;
 
 bool Renderer::Init(int width, int height, const std::string& name)
 {
-    s_Renderer = RendererFactory::Instance().Create("opengl");
+    Instance = RendererFactory::Instance().Create("opengl");
 
-    if (!s_Renderer)
+    if (!Instance)
     {
         std::cout << "[ERROR] Renderer creation failed\n";
         return false;
     }
 
-    return s_Renderer->Init(width, height, name);
+    return Instance->Init(width, height, name);
 }
 
 void Renderer::Render()
 {
-    s_Renderer->Render();
+    Instance->Render();
 }
 
 void Renderer::Shutdown()
 {
-    s_Renderer->Shutdown();
+    Instance->Shutdown();
 }
