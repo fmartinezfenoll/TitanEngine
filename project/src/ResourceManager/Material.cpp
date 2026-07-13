@@ -43,4 +43,7 @@ void Material::Bind() const
         metallicRoughness->Bind(2);
         shader->SetInt("metallicRoughnessMap", 2);
     }
+
+    shader->SetFloat("metallicFactor", metallicFactor);
+    shader->SetFloat("roughnessFactor", roughnessFactor);
 }

@@ -30,3 +30,12 @@ struct ShadowRenderData {
     glm::vec3 pointLightPos[2];
     float pointFarPlane[2] = {0.0f, 0.0f};
 };
+
+// Image-based lighting textures ready to be bound/sampled during the main
+// render pass, already resolved to texture units by the renderer.
+struct IBLRenderData {
+    bool hasIBL = false;
+    unsigned int irradianceSlot = 8;
+    unsigned int prefilterSlot = 9;
+    unsigned int brdfLUTSlot = 10;
+};

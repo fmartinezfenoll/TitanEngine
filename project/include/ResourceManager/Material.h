@@ -24,6 +24,11 @@ public:
     std::shared_ptr<Texture> metallicRoughness;
     glm::vec4 baseColor{1.0f};
 
+    // Scalar factors, glTF convention: multiplied with metallicRoughnessMap's
+    // B (metallic) / G (roughness) channels when present, used alone otherwise.
+    float metallicFactor = 1.0f;
+    float roughnessFactor = 1.0f;
+
 private:
     std::shared_ptr<OpenGLShader> shader;
 };

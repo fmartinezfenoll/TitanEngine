@@ -139,6 +139,9 @@ std::shared_ptr<Material> ProcessMaterial(const tinygltf::Model& model, int mate
                                             matName + "_normal", baseDir);
         material->metallicRoughness = LoadGltfTexture(model, pbr.metallicRoughnessTexture.index,
                                                         matName + "_mr", baseDir);
+
+        material->metallicFactor = static_cast<float>(pbr.metallicFactor);
+        material->roughnessFactor = static_cast<float>(pbr.roughnessFactor);
     }
 
     ResourceManager::AddMaterial(matName, material);

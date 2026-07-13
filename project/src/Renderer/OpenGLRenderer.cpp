@@ -140,6 +140,7 @@ bool OpenGLRenderer::Init(int width, int height, const std::string& appName)
 
 void OpenGLRenderer::Shutdown()
 {
+    if (brdfLUTID != 0) glDeleteTextures(1, &brdfLUTID);
     Skybox::ShutdownSharedGeometry();
     GizmoRenderer::Shutdown();
     ImGui_ImplOpenGL3_Shutdown();
@@ -214,7 +215,12 @@ void OpenGLRenderer::BeginFrame()
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
-    glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
+
+    glm::vec3 clearColor(0.1f, 0.1f, 0.15f);
+    if (Scene* activeScene = SceneManager::Instance().GetActiveScene()) {
+        clearColor = activeScene->GetClearColor();
+    }
+    glClearColor(clearColor.r, clearColor.g, clearColor.b, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
 void OpenGLRenderer::ReconcileShadowFramebuffers(Scene* activeScene)
@@ -243,6 +249,52 @@ void OpenGLRenderer::ReconcileShadowFramebuffers(Scene* activeScene)
 
         shadowFramebuffers[lightNode] = std::make_unique<ShadowFramebuffer>(resolution, isCubemap);
     }
+}
+
+void OpenGLRenderer::EnsureBRDFLUTGenerated()
+{
+    if (brdfLUTID != 0) return;
+
+    constexpr int kBRDFLUTResolution = 512;
+
+    glGenTextures(1, &brdfLUTID);
+    glBindTexture(GL_TEXTURE_2D, brdfLUTID);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RG16F, kBRDFLUTResolution, kBRDFLUTResolution, 0, GL_RG, GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    unsigned int fbo = 0;
+    glGenFramebuffers(1, &fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, brdfLUTID, 0);
+    glDrawBuffer(GL_COLOR_ATTACHMENT0);
+    glReadBuffer(GL_NONE);
+
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        std::cout << "[ERROR] BRDF LUT framebuffer incomplete" << std::endl;
+
+    GLint prevViewport[4];
+    glGetIntegerv(GL_VIEWPORT, prevViewport);
+    glViewport(0, 0, kBRDFLUTResolution, kBRDFLUTResolution);
+
+    auto shader = ResourceManager::LoadShader("ibl_brdf_lut");
+    if (shader) {
+        shader->Bind();
+
+        unsigned int emptyVAO = 0;
+        glGenVertexArrays(1, &emptyVAO);
+        glBindVertexArray(emptyVAO);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glBindVertexArray(0);
+        glDeleteVertexArrays(1, &emptyVAO);
+    }
+
+    glViewport(prevViewport[0], prevViewport[1], prevViewport[2], prevViewport[3]);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glDeleteFramebuffers(1, &fbo);
 }
 
 std::vector<ShadowMapData> OpenGLRenderer::RenderShadowPass(Scene* activeScene, const glm::vec3& cameraWorldPos)
@@ -418,16 +470,43 @@ void OpenGLRenderer::Render()
         Frustum frustum;
         frustum.updateFromCamera(projection * view);
 
-        if (Skybox* skybox = activeScene->GetSkybox()) {
+        Skybox* skybox = activeScene->GetSkybox();
+
+        IBLRenderData iblRenderData;
+        if (skybox && EngineSettings::IsIBLEnabled()) {
+            EnsureBRDFLUTGenerated();
+            skybox->EnsureIBLGenerated();
+
+            if (skybox->IsIBLGenerated()) {
+                iblRenderData.hasIBL = true;
+
+                glActiveTexture(GL_TEXTURE0 + iblRenderData.irradianceSlot);
+                glBindTexture(GL_TEXTURE_CUBE_MAP, skybox->GetIrradianceMap());
+
+                glActiveTexture(GL_TEXTURE0 + iblRenderData.prefilterSlot);
+                glBindTexture(GL_TEXTURE_CUBE_MAP, skybox->GetPrefilterMap());
+
+                glActiveTexture(GL_TEXTURE0 + iblRenderData.brdfLUTSlot);
+                glBindTexture(GL_TEXTURE_2D, brdfLUTID);
+            }
+        }
+
+        if (skybox) {
             skybox->Draw(view, projection);
         }
 
         DrawGrid(activeScene, view, projection);
 
+        bool wireframe = EngineSettings::IsWireframeEnabled();
+        if (wireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+
         TNode* root = activeScene->GetRoot();
         if (root) {
-            activeScene->Draw(frustum, view, projection, lights, shadowRenderData);
+            activeScene->Draw(frustum, view, projection, cameraWorldPos, lights, shadowRenderData, iblRenderData);
         }
+
+        if (wireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+
         DrawGizmos(activeScene, view, projection);
         DrawSelectionHighlight(activeScene, view, projection);
         DrawTransformGizmo(activeScene, view, projection);

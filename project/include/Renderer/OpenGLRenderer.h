@@ -55,6 +55,8 @@ private:
 
     bool appliedVSync = true;
 
+    unsigned int brdfLUTID = 0;
+
     std::unordered_map<TNode*, std::unique_ptr<ShadowFramebuffer>> shadowFramebuffers;
 
     void UpdateCameraInput(float deltaTime);
@@ -65,4 +67,5 @@ private:
 
     std::vector<ShadowMapData> RenderShadowPass(Scene* activeScene, const glm::vec3& cameraWorldPos);
     void ReconcileShadowFramebuffers(Scene* activeScene);
+    void EnsureBRDFLUTGenerated();
 };
