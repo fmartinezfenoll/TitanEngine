@@ -1,6 +1,14 @@
 CXX := g++
 CC  := gcc
 
+# Parallel build by default (override with `make -j1` to force serial).
+ifeq ($(OS), Windows_NT)
+    NPROC := $(NUMBER_OF_PROCESSORS)
+else
+    NPROC := $(shell nproc 2>/dev/null || echo 4)
+endif
+MAKEFLAGS += -j$(NPROC)
+
 RENDERER ?= opengl
 UPRENDERER := $(shell echo $(RENDERER) | tr a-z A-Z)
 

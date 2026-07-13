@@ -23,3 +23,7 @@ Thumbs.db
 *.log
 /CLAUDE.md
 /SESSIONS.md
+
+# Local engine preferences (per-machine, regenerated on shutdown)
+/project/engine.ini
+imgui.ini
