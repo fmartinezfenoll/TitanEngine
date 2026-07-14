@@ -14,6 +14,7 @@
 #include "Renderer/GizmoRenderer.h"
 #include "Renderer/Skybox.h"
 #include "Debug/DebugUI.h"
+#include "Debug/ProjectBrowser.h"
 #include "Core/Stats.h"
 #include "Core/EngineSettings.h"
 
@@ -95,6 +96,16 @@ bool OpenGLRenderer::Init(int width, int height, const std::string& appName)
         }
     );
 
+    // External file-drop callback: dropping files from the OS file explorer onto
+    // the window queues them for import into the Project browser's current folder.
+    glfwSetDropCallback(
+        static_cast<GLFWwindow*>(window),
+        [](GLFWwindow*, int count, const char** paths)
+        {
+            ProjectBrowser::EnqueueDroppedPaths(count, paths);
+        }
+    );
+
     // Default OpenGL state
     glEnable(GL_DEPTH_TEST);
     glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
@@ -162,14 +173,19 @@ void OpenGLRenderer::UpdateCameraInput(float deltaTime)
 
     GLFWwindow* win = static_cast<GLFWwindow*>(window);
 
-    glm::vec3 moveDir(0.0f);
-    if (glfwGetKey(win, GLFW_KEY_W) == GLFW_PRESS) moveDir.z += 1.0f;
-    if (glfwGetKey(win, GLFW_KEY_S) == GLFW_PRESS) moveDir.z -= 1.0f;
-    if (glfwGetKey(win, GLFW_KEY_D) == GLFW_PRESS) moveDir.x += 1.0f;
-    if (glfwGetKey(win, GLFW_KEY_A) == GLFW_PRESS) moveDir.x -= 1.0f;
-    if (glfwGetKey(win, GLFW_KEY_SPACE) == GLFW_PRESS) moveDir.y += 1.0f;
-    if (glfwGetKey(win, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS) moveDir.y -= 1.0f;
-    camera->ProcessKeyboard(moveDir, deltaTime);
+    // Skip WASD/Space/Ctrl movement while ImGui has keyboard focus (typing in the
+    // search filter, a rename field, etc.) -- otherwise those letters also drive
+    // the camera underneath the UI.
+    if (!ImGui::GetIO().WantCaptureKeyboard) {
+        glm::vec3 moveDir(0.0f);
+        if (glfwGetKey(win, GLFW_KEY_W) == GLFW_PRESS) moveDir.z += 1.0f;
+        if (glfwGetKey(win, GLFW_KEY_S) == GLFW_PRESS) moveDir.z -= 1.0f;
+        if (glfwGetKey(win, GLFW_KEY_D) == GLFW_PRESS) moveDir.x += 1.0f;
+        if (glfwGetKey(win, GLFW_KEY_A) == GLFW_PRESS) moveDir.x -= 1.0f;
+        if (glfwGetKey(win, GLFW_KEY_SPACE) == GLFW_PRESS) moveDir.y += 1.0f;
+        if (glfwGetKey(win, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS) moveDir.y -= 1.0f;
+        camera->ProcessKeyboard(moveDir, deltaTime);
+    }
 
     if (glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS)
     {

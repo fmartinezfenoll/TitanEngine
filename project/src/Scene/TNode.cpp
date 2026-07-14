@@ -1,6 +1,7 @@
 #include "Scene/TNode.h"
 #include "Scene/MeshComponent.h"
 #include "Scene/MaterialComponent.h"
+#include "ResourceManager/Material.h"
 #include "Core/EngineSettings.h"
 
 void Frustum::updateFromCamera(const glm::mat4& vp) {
@@ -38,7 +39,8 @@ void Frustum::updateFromCamera(const glm::mat4& vp) {
 
 void TNode::draw(const Frustum& frustum, const glm::mat4& view, const glm::mat4& projection,
                  const glm::vec3& cameraWorldPos, const std::vector<LightUniformData>& lights,
-                 const ShadowRenderData& shadowData, const IBLRenderData& iblData, const glm::mat4& parentMatrix) {
+                 const ShadowRenderData& shadowData, const IBLRenderData& iblData,
+                 std::vector<TransparentDrawItem>* outTransparent, const glm::mat4& parentMatrix) {
     glm::mat4 modelMatrix = parentMatrix * transform.getModelMatrix();
 
     bool passesCulling = !EngineSettings::IsFrustumCullingEnabled()
@@ -47,13 +49,19 @@ void TNode::draw(const Frustum& frustum, const glm::mat4& view, const glm::mat4&
     if (passesCulling) {
         if (visible) {
             if (auto* mesh = GetComponent<MeshComponent>()) {
-                mesh->Draw(modelMatrix, GetComponent<MaterialComponent>(), view, projection, cameraWorldPos, lights, shadowData, iblData);
+                auto* materialComp = GetComponent<MaterialComponent>();
+                bool isTransparent = materialComp && materialComp->material && materialComp->material->transparent;
+                if (isTransparent && outTransparent) {
+                    outTransparent->push_back({this, modelMatrix});
+                } else {
+                    mesh->Draw(modelMatrix, materialComp, view, projection, cameraWorldPos, lights, shadowData, iblData);
+                }
             }
         }
 
         for (TNode* child : children) {
             if (child) {
-                child->draw(frustum, view, projection, cameraWorldPos, lights, shadowData, iblData, modelMatrix);
+                child->draw(frustum, view, projection, cameraWorldPos, lights, shadowData, iblData, outTransparent, modelMatrix);
             }
         }
     }

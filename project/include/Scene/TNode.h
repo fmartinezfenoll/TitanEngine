@@ -13,6 +13,7 @@
 // Forward declarations
 struct BoundingVolume;
 struct Frustum;
+class TNode;
 class MeshComponent;
 class MaterialComponent;
 class OpenGLShader;
@@ -134,6 +135,16 @@ struct Transform {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 📌 STRUCT TRANSPARENT DRAW ITEM
+// A transparent-material node deferred out of TNode::draw's normal recursive
+// walk, along with its already-computed world matrix (avoids recomputing the
+// full parent chain via getGlobalPosition() when sorting back-to-front).
+struct TransparentDrawItem {
+    TNode* node;
+    glm::mat4 modelMatrix;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 📌 CLASS TNODE
 class TNode {
 public:
@@ -219,6 +230,7 @@ public:
     void draw(const Frustum& frustum, const glm::mat4& view, const glm::mat4& projection,
               const glm::vec3& cameraWorldPos, const std::vector<LightUniformData>& lights,
               const ShadowRenderData& shadowData, const IBLRenderData& iblData,
+              std::vector<TransparentDrawItem>* outTransparent,
               const glm::mat4& parentMatrix = glm::mat4(1.0f));
 
     void drawDepthOnly(OpenGLShader* depthShader, const glm::mat4& parentMatrix = glm::mat4(1.0f));

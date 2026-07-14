@@ -8,6 +8,7 @@
 #include "Scene/MaterialComponent.h"
 #include "Scene/LightComponent.h"
 #include "ResourceManager/Material.h"
+#include "ResourceManager/MaterialSerializer.h"
 #include "ResourceManager/Texture.h"
 #include "ResourceManager/OpenGLShader.h"
 #include "ResourceManager/ResourceManager.h"
@@ -16,6 +17,7 @@
 #include "Renderer/Skybox.h"
 #include "ResourceManager/CubemapTexture.h"
 #include "Debug/ProjectBrowser.h"
+#include "Debug/MaterialIcons.h"
 #include "Core/Stats.h"
 #include "Core/EngineSettings.h"
 #include "Core/EngineConfig.h"
@@ -130,6 +132,9 @@ TNode* SpawnLightNode(LightType type) {
 
 TNode* DebugUI::selectedNode = nullptr;
 bool DebugUI::sceneSelected = false;
+std::string DebugUI::inspectingMaterialPath = "";
+std::shared_ptr<Material> DebugUI::inspectingMaterial = nullptr;
+ImFont* DebugUI::iconFont = nullptr;
 bool DebugUI::showDeleteConfirm = false;
 std::string DebugUI::sceneToDelete = "";
 
@@ -138,6 +143,7 @@ bool DebugUI::showNodeDeleteConfirm = false;
 
 std::vector<TNode*> DebugUI::multiSelectedNodes;
 bool DebugUI::showMultiDeleteConfirm = false;
+std::string DebugUI::copiedNodeJson = "";
 
 bool DebugUI::showSaveConfirm = false;
 std::string DebugUI::sceneToSave = "";
@@ -172,6 +178,9 @@ std::string DebugUI::lastAutoSaveStatus = "";
 bool DebugUI::renamingScene = false;
 char DebugUI::sceneRenameBuffer[128] = "";
 std::string DebugUI::sceneRenameError = "";
+
+char DebugUI::saveMaterialBuffer[128] = "";
+std::string DebugUI::saveMaterialError = "";
 
 void DebugUI::Init() {
     // ImGui context is already created by OpenGLRenderer
@@ -258,6 +267,20 @@ void DebugUI::ApplyTheme() {
     colors[ImGuiCol_TextSelectedBg]        = accentDim;
     colors[ImGuiCol_DragDropTarget]        = accentHi;
     colors[ImGuiCol_NavHighlight]          = accent;
+
+    // Icon font: a small subset of Google Material Symbols (see MaterialIcons.h),
+    // loaded as a SEPARATE font (MergeMode = false) rather than merged into the
+    // default font, so normal UI text is unaffected. Activated explicitly via
+    // PushFont(DebugUI::GetIconFont())/PopFont() wherever an icon is drawn.
+    ImGuiIO& io = ImGui::GetIO();
+    io.Fonts->AddFontDefault();
+
+    static const ImWchar iconRanges[] = { MATERIAL_ICONS_CODEPOINTS, 0 };
+    ImFontConfig iconFontConfig;
+    iconFontConfig.MergeMode = false;
+    iconFont = io.Fonts->AddFontFromFileTTF(
+        "resources/fonts/materialsymbols/MaterialSymbolsOutlined.ttf",
+        18.0f, &iconFontConfig, iconRanges);
 }
 
 void DebugUI::Shutdown() {
@@ -434,6 +457,8 @@ TNode* DebugUI::PickAtCursor(Scene* activeScene) {
 void DebugUI::SelectNode(TNode* node) {
     selectedNode = node;
     sceneSelected = false;
+    inspectingMaterialPath.clear();
+    inspectingMaterial = nullptr;
     gizmoMode = GizmoMode::Move;
     multiSelectedNodes.clear();
 }
@@ -458,6 +483,8 @@ void DebugUI::ToggleNodeInMultiSelect(TNode* node) {
     }
 
     sceneSelected = false;
+    inspectingMaterialPath.clear();
+    inspectingMaterial = nullptr;
     if (multiSelectedNodes.size() == 1) {
         selectedNode = multiSelectedNodes[0];
         multiSelectedNodes.clear();
@@ -471,7 +498,17 @@ void DebugUI::ToggleNodeInMultiSelect(TNode* node) {
 void DebugUI::SelectScene() {
     selectedNode = nullptr;
     sceneSelected = true;
+    inspectingMaterialPath.clear();
+    inspectingMaterial = nullptr;
     multiSelectedNodes.clear();
+}
+
+void DebugUI::SelectMaterialAsset(const std::string& path) {
+    selectedNode = nullptr;
+    sceneSelected = false;
+    multiSelectedNodes.clear();
+    inspectingMaterialPath = path;
+    inspectingMaterial = MaterialSerializer::Load(path);
 }
 
 void DebugUI::FocusOnSelected(Scene* activeScene) {
@@ -825,6 +862,18 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
                     }
                 }
             }
+
+            if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_C)) {
+                copiedNodeJson = SceneSerializer::SerializeNodeToString(selectedNode);
+            }
+        }
+
+        if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_V) && !copiedNodeJson.empty()) {
+            TNode* parent = selectedNode ? selectedNode : activeScene->GetRoot();
+            if (TNode* pasted = SceneSerializer::DeserializeNodeFromString(copiedNodeJson, activeScene)) {
+                parent->addChild(pasted);
+                SelectNode(pasted);
+            }
         }
 
         if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
@@ -1151,6 +1200,16 @@ void DebugUI::DrawSceneTree(TNode* node, Scene* activeScene, int depth) {
             if (ImGui::MenuItem(("Delete " + std::to_string(multiSelectedNodes.size()) + " Selected").c_str())) {
                 showMultiDeleteConfirm = true;
             }
+
+            if (ImGui::MenuItem(("Duplicate " + std::to_string(multiSelectedNodes.size()) + " Selected").c_str())) {
+                std::vector<TNode*> toDuplicate = multiSelectedNodes;
+                for (TNode* original : toDuplicate) {
+                    if (!original->parent) continue;
+                    if (TNode* duplicate = SceneSerializer::DuplicateNode(original, activeScene)) {
+                        original->parent->addChild(duplicate);
+                    }
+                }
+            }
         } else {
             if (ImGui::MenuItem("Rename")) {
                 renamingNode = node;
@@ -1162,6 +1221,33 @@ void DebugUI::DrawSceneTree(TNode* node, Scene* activeScene, int depth) {
             if (ImGui::MenuItem("Delete")) {
                 nodeToDelete = node;
                 showNodeDeleteConfirm = true;
+            }
+
+            if (ImGui::MenuItem("Duplicate")) {
+                if (node->parent) {
+                    if (TNode* duplicate = SceneSerializer::DuplicateNode(node, activeScene)) {
+                        node->parent->addChild(duplicate);
+                        SelectNode(duplicate);
+                    }
+                }
+            }
+
+            if (ImGui::MenuItem("Copy")) {
+                copiedNodeJson = SceneSerializer::SerializeNodeToString(node);
+            }
+
+            if (ImGui::MenuItem("Paste", nullptr, false, !copiedNodeJson.empty())) {
+                if (TNode* pasted = SceneSerializer::DeserializeNodeFromString(copiedNodeJson, activeScene)) {
+                    node->addChild(pasted);
+                    SelectNode(pasted);
+                }
+            }
+
+            if (node->GetComponent<CameraComponent>()) {
+                bool isMain = activeScene && activeScene->GetMainCamera() == node;
+                if (ImGui::MenuItem("Set as Main Camera", nullptr, false, !isMain)) {
+                    activeScene->SetMainCamera(node);
+                }
             }
 
             ImGui::Separator();
@@ -1200,10 +1286,25 @@ void DebugUI::DrawSceneTree(TNode* node, Scene* activeScene, int depth) {
 }
 
 void DebugUI::DrawInspector(Scene* activeScene) {
-    if (!selectedNode && !sceneSelected) return;
+    if (!selectedNode && !sceneSelected && inspectingMaterialPath.empty()) return;
 
     ImGui::SetNextWindowPos(ImVec2(520, 10), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(400, 700), ImGuiCond_FirstUseEver);
+
+    if (!inspectingMaterialPath.empty()) {
+        if (ImGui::Begin("Inspector", nullptr)) {
+            ImGui::Text("Material Asset: %s", inspectingMaterialPath.c_str());
+            ImGui::Separator();
+            ImGui::Spacing();
+            if (inspectingMaterial) {
+                DrawMaterialFields(inspectingMaterial, &inspectingMaterialPath);
+            } else {
+                ImGui::TextDisabled("Failed to load material.");
+            }
+        }
+        ImGui::End();
+        return;
+    }
 
     if (sceneSelected) {
         if (ImGui::Begin("Inspector", nullptr)) {
@@ -1368,33 +1469,23 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                     if (const auto& mat = materialComp->material) {
                         auto shader = mat->GetShader();
                         ImGui::BulletText("Shader: %s", shader ? shader->GetName().c_str() : "None");
-                        ImGui::BulletText("Base Color: (%.2f, %.2f, %.2f, %.2f)",
-                            mat->baseColor.r, mat->baseColor.g, mat->baseColor.b, mat->baseColor.a);
-                        auto dropTextureSlot = [](const char* label, std::shared_ptr<Texture>& slot) {
-                            std::string buttonLabel = std::string(label) + ": " + (slot ? "Yes" : "None");
-                            ImGui::Button(buttonLabel.c_str(), ImVec2(220, 0));
-                            if (ImGui::BeginDragDropTarget()) {
-                                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(ProjectBrowser::kTexturePayloadType)) {
-                                    std::string filePath(static_cast<const char*>(payload->Data));
-                                    std::string texName = filePath;
-                                    std::replace(texName.begin(), texName.end(), '/', '_');
-                                    std::replace(texName.begin(), texName.end(), '\\', '_');
-                                    slot = ResourceManager::LoadTexture(texName, filePath);
+                        if (ImGui::BeginDragDropTarget()) {
+                            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(ProjectBrowser::kMaterialPayloadType)) {
+                                std::string filePath(static_cast<const char*>(payload->Data));
+                                if (auto loaded = MaterialSerializer::Load(filePath)) {
+                                    materialComp->material = loaded;
                                 }
-                                ImGui::EndDragDropTarget();
                             }
-                        };
-
-                        dropTextureSlot("Albedo Texture", mat->albedo);
-                        if (mat->albedo) {
-                            ImGui::Indent();
-                            ImGui::BulletText("%dx%d", mat->albedo->GetWidth(), mat->albedo->GetHeight());
-                            ImGui::Unindent();
+                            ImGui::EndDragDropTarget();
                         }
-                        dropTextureSlot("Normal Texture", mat->normal);
-                        dropTextureSlot("MetallicRoughness Texture", mat->metallicRoughness);
-                        ImGui::SliderFloat("Metallic##material", &mat->metallicFactor, 0.0f, 1.0f);
-                        ImGui::SliderFloat("Roughness##material", &mat->roughnessFactor, 0.0f, 1.0f);
+                        DrawMaterialFields(mat, nullptr);
+
+                        if (ImGui::Button("Save Material As...##material")) {
+                            saveMaterialBuffer[0] = '\0';
+                            saveMaterialError.clear();
+                            ImGui::OpenPopup("Save Material##popup");
+                        }
+                        DrawSaveMaterialPopup(mat);
                     } else {
                         ImGui::BulletText("No material resource");
                     }
@@ -1636,6 +1727,84 @@ void DebugUI::DrawAddComponentMenu(TNode* node, Scene* activeScene) {
         }
 
         ImGui::EndMenu();
+    }
+}
+
+void DebugUI::DrawMaterialFields(const std::shared_ptr<Material>& mat, const std::string* assetPath) {
+    if (!mat) return;
+
+    bool changed = false;
+    changed |= ImGui::ColorEdit4("Base Color##material", &mat->baseColor.x);
+
+    auto dropTextureSlot = [](const char* label, std::shared_ptr<Texture>& slot) {
+        bool dropped = false;
+        std::string buttonLabel = std::string(label) + ": " + (slot ? "Yes" : "None");
+        ImGui::Button(buttonLabel.c_str(), ImVec2(220, 0));
+        if (ImGui::BeginDragDropTarget()) {
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(ProjectBrowser::kTexturePayloadType)) {
+                std::string filePath(static_cast<const char*>(payload->Data));
+                std::string texName = filePath;
+                std::replace(texName.begin(), texName.end(), '/', '_');
+                std::replace(texName.begin(), texName.end(), '\\', '_');
+                slot = ResourceManager::LoadTexture(texName, filePath);
+                dropped = true;
+            }
+            ImGui::EndDragDropTarget();
+        }
+        return dropped;
+    };
+
+    changed |= dropTextureSlot("Albedo Texture", mat->albedo);
+    if (mat->albedo) {
+        ImGui::Indent();
+        ImGui::BulletText("%dx%d", mat->albedo->GetWidth(), mat->albedo->GetHeight());
+        ImGui::Unindent();
+    }
+    changed |= dropTextureSlot("Normal Texture", mat->normal);
+    changed |= dropTextureSlot("MetallicRoughness Texture", mat->metallicRoughness);
+    changed |= ImGui::SliderFloat("Metallic##material", &mat->metallicFactor, 0.0f, 1.0f);
+    changed |= ImGui::SliderFloat("Roughness##material", &mat->roughnessFactor, 0.0f, 1.0f);
+    changed |= ImGui::Checkbox("Transparent##material", &mat->transparent);
+
+    if (changed && assetPath) {
+        MaterialSerializer::Save(mat, *assetPath);
+    }
+}
+
+void DebugUI::DrawSaveMaterialPopup(const std::shared_ptr<Material>& material) {
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+
+    if (ImGui::BeginPopupModal("Save Material##popup", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::SetNextItemWidth(240);
+        bool commit = ImGui::InputText("##SaveMaterialInput", saveMaterialBuffer, sizeof(saveMaterialBuffer),
+            ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+
+        if (!saveMaterialError.empty()) {
+            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", saveMaterialError.c_str());
+        }
+
+        bool confirmed = ImGui::Button("OK") || commit;
+        ImGui::SameLine();
+        bool cancelled = ImGui::Button("Cancel");
+
+        if (confirmed) {
+            std::string name = saveMaterialBuffer;
+            if (name.empty()) {
+                saveMaterialError = "Name cannot be empty.";
+            } else {
+                std::string filePath = "resources/materials/" + name + ".material";
+                if (MaterialSerializer::Save(material, filePath)) {
+                    ImGui::CloseCurrentPopup();
+                } else {
+                    saveMaterialError = "Failed to save material.";
+                }
+            }
+        } else if (cancelled) {
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
     }
 }
 

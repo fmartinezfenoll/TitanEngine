@@ -29,6 +29,11 @@ public:
     float metallicFactor = 1.0f;
     float roughnessFactor = 1.0f;
 
+    // When true, drawn in the transparent pass (back-to-front sorted, GL_BLEND
+    // enabled, depth writes disabled). Simple on/off blend flag, not a full
+    // glTF alphaMode enum -- MASK/alpha-cutoff is out of scope.
+    bool transparent = false;
+
 private:
     std::shared_ptr<OpenGLShader> shader;
 };

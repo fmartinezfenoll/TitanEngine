@@ -19,6 +19,8 @@ public:
     int GetHeight() const { return Height; }
     bool IsValid() const { return ID != 0; }
     const std::string& GetFilePath() const { return FilePath; }
+    // Raw GL texture id, for ImGui::Image thumbnails/previews: (ImTextureID)(intptr_t)GetID().
+    unsigned int GetID() const { return ID; }
 
     // Reads the texture back from the GPU and writes it to disk as a PNG,
     // then updates GetFilePath() to point at it. Used to bake embedded glTF

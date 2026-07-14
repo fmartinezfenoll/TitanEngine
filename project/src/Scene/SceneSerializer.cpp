@@ -135,6 +135,7 @@ json SerializeComponents(const TNode* node) {
             j["baseColor"] = {mat->baseColor.r, mat->baseColor.g, mat->baseColor.b, mat->baseColor.a};
             j["metallicFactor"] = mat->metallicFactor;
             j["roughnessFactor"] = mat->roughnessFactor;
+            j["transparent"] = mat->transparent;
 
             auto serializeTextureSlot = [&](const char* key, const std::shared_ptr<Texture>& tex) {
                 if (!tex) return;
@@ -231,6 +232,7 @@ void DeserializeComponents(TNode* node, Scene* scene, const json& j) {
             }
             if (compJson.contains("metallicFactor")) material->metallicFactor = compJson["metallicFactor"];
             if (compJson.contains("roughnessFactor")) material->roughnessFactor = compJson["roughnessFactor"];
+            if (compJson.contains("transparent")) material->transparent = compJson["transparent"];
 
             auto deserializeTextureSlot = [&](const char* key, std::shared_ptr<Texture>& slot) {
                 if (!compJson.contains(key)) return;
@@ -466,6 +468,21 @@ TNode* SceneSerializer::DuplicateNode(const TNode* node, Scene* scene) {
         return DeserializeNode(j, scene);
     } catch (const std::exception& e) {
         Log::Error(std::string("Error duplicating node: ") + e.what());
+        return nullptr;
+    }
+}
+
+std::string SceneSerializer::SerializeNodeToString(const TNode* node) {
+    if (!node) return "";
+    return SerializeNode(node).dump();
+}
+
+TNode* SceneSerializer::DeserializeNodeFromString(const std::string& jsonStr, Scene* scene) {
+    try {
+        json j = json::parse(jsonStr);
+        return DeserializeNode(j, scene);
+    } catch (const std::exception& e) {
+        Log::Error(std::string("Error pasting node: ") + e.what());
         return nullptr;
     }
 }
