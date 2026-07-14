@@ -5,6 +5,7 @@
 #include "Scene/TNode.h"
 #include "Scene/MaterialComponent.h"
 #include "Scene/GLTFLoader.h"
+#include "Scene/PrefabSerializer.h"
 #include "Core/EngineSettings.h"
 #include "Core/EngineConfig.h"
 #include "ResourceManager/Material.h"
@@ -25,7 +26,7 @@
 
 namespace {
 
-enum class AssetKind { Folder, Scene, Shader, Model, Texture, Material, Other };
+enum class AssetKind { Folder, Scene, Shader, Model, Texture, Material, Prefab, Other };
 
 AssetKind ClassifyPath(const std::filesystem::path& path) {
     if (std::filesystem::is_directory(path)) return AssetKind::Folder;
@@ -38,6 +39,7 @@ AssetKind ClassifyPath(const std::filesystem::path& path) {
     if (ext == ".glb" || ext == ".gltf") return AssetKind::Model;
     if (ext == ".png" || ext == ".jpg" || ext == ".jpeg") return AssetKind::Texture;
     if (ext == ".material") return AssetKind::Material;
+    if (ext == ".prefab") return AssetKind::Prefab;
     return AssetKind::Other;
 }
 
@@ -49,6 +51,7 @@ ImVec4 ColorForKind(AssetKind kind) {
         case AssetKind::Model:    return ImVec4(0.40f, 0.80f, 0.55f, 1.0f);
         case AssetKind::Texture:  return ImVec4(0.90f, 0.60f, 0.35f, 1.0f);
         case AssetKind::Material: return ImVec4(0.85f, 0.40f, 0.45f, 1.0f);
+        case AssetKind::Prefab:   return ImVec4(0.45f, 0.55f, 0.90f, 1.0f);
         default:                  return ImVec4(0.55f, 0.55f, 0.58f, 1.0f);
     }
 }
@@ -64,6 +67,7 @@ const char* IconForKind(AssetKind kind) {
         case AssetKind::Model:    return ICON_MODEL;
         case AssetKind::Texture:  return ICON_IMAGE;
         case AssetKind::Material: return ICON_PALETTE;
+        case AssetKind::Prefab:   return ICON_MODEL;
         default:                  return ICON_FILE;
     }
 }
@@ -537,6 +541,8 @@ void ProjectBrowser::DrawItem(const std::filesystem::directory_entry& entry, Sce
                 ImGui::SetDragDropPayload(ProjectBrowser::kTexturePayloadType, pathStr.c_str(), pathStr.size() + 1);
             } else if (kind == AssetKind::Material) {
                 ImGui::SetDragDropPayload(ProjectBrowser::kMaterialPayloadType, pathStr.c_str(), pathStr.size() + 1);
+            } else if (kind == AssetKind::Prefab) {
+                ImGui::SetDragDropPayload(ProjectBrowser::kPrefabPayloadType, pathStr.c_str(), pathStr.size() + 1);
             }
             ImGui::SetDragDropPayload(ProjectBrowser::kAssetMovePayloadType, pathStr.c_str(), pathStr.size() + 1);
             ImGui::Text("%s", name.c_str());
@@ -602,8 +608,8 @@ void ProjectBrowser::DrawDetailsPanel() {
     ImGui::TextWrapped("%s", selectedPath.filename().string().c_str());
     ImGui::Spacing();
 
-    const char* kindNames[] = {"Folder", "Scene", "Shader", "Model", "Texture", "Material", "File"};
-    int kindIdx = std::min(static_cast<int>(kind), 6);
+    const char* kindNames[] = {"Folder", "Scene", "Shader", "Model", "Texture", "Material", "Prefab", "File"};
+    int kindIdx = std::min(static_cast<int>(kind), 7);
     ImGui::Text("Type: %s", kindNames[kindIdx]);
 
     if (!std::filesystem::is_directory(selectedPath, ec)) {
@@ -673,6 +679,14 @@ void ProjectBrowser::HandleActivate(const std::filesystem::path& path, SceneMana
             }
             break;
         }
+        case AssetKind::Prefab: {
+            if (activeScene) {
+                if (TNode* instance = PrefabSerializer::Instantiate(path.string(), activeScene)) {
+                    activeScene->GetRoot()->addChild(instance);
+                }
+            }
+            break;
+        }
         default:
             break;
     }
@@ -734,6 +748,15 @@ void ProjectBrowser::DrawContextMenu(const std::filesystem::path& path, SceneMan
             }
             break;
         }
+        case AssetKind::Prefab:
+            if (ImGui::MenuItem("Instantiate")) {
+                if (Scene* active = SceneManager::Instance().GetActiveScene()) {
+                    if (TNode* instance = PrefabSerializer::Instantiate(path.string(), active)) {
+                        active->GetRoot()->addChild(instance);
+                    }
+                }
+            }
+            break;
         default:
             break;
     }

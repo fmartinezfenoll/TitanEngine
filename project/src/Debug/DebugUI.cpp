@@ -3,6 +3,7 @@
 #include "Scene/Scene.h"
 #include "Scene/TNode.h"
 #include "Scene/SceneSerializer.h"
+#include "Scene/PrefabSerializer.h"
 #include "Scene/CameraComponent.h"
 #include "Scene/MeshComponent.h"
 #include "Scene/MaterialComponent.h"
@@ -181,6 +182,10 @@ std::string DebugUI::sceneRenameError = "";
 
 char DebugUI::saveMaterialBuffer[128] = "";
 std::string DebugUI::saveMaterialError = "";
+
+TNode* DebugUI::creatingPrefabFrom = nullptr;
+char DebugUI::createPrefabBuffer[128] = "";
+std::string DebugUI::createPrefabError = "";
 
 void DebugUI::Init() {
     // ImGui context is already created by OpenGLRenderer
@@ -1030,6 +1035,21 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
                     }
                 }
 
+                // Drop a .prefab from the Project Browser anywhere in this window to
+                // instantiate it as a child of the scene root.
+                if (ImGui::BeginDragDropTarget()) {
+                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(ProjectBrowser::kPrefabPayloadType)) {
+                        std::string filePath(static_cast<const char*>(payload->Data));
+                        if (root) {
+                            if (TNode* instance = PrefabSerializer::Instantiate(filePath, activeScene)) {
+                                root->addChild(instance);
+                                SelectNode(instance);
+                            }
+                        }
+                    }
+                    ImGui::EndDragDropTarget();
+                }
+
                 if (ImGui::BeginPopupContextWindow("SceneRootContextMenu", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems)) {
                     if (root) {
                         DrawCreateMenu(root, activeScene);
@@ -1076,6 +1096,7 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
     DrawNodeDeleteConfirmation();
     DrawMultiDeleteConfirmation();
     DrawSaveConfirmation();
+    DrawCreatePrefabPopup();
 }
 
 std::string DebugUI::DescribeNode(TNode* node) {
@@ -1179,6 +1200,18 @@ void DebugUI::DrawSceneTree(TNode* node, Scene* activeScene, int depth) {
         }
     }
 
+    // Drop a .prefab onto this node's row to instantiate it as a child of this node.
+    if (ImGui::BeginDragDropTarget()) {
+        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(ProjectBrowser::kPrefabPayloadType)) {
+            std::string filePath(static_cast<const char*>(payload->Data));
+            if (TNode* instance = PrefabSerializer::Instantiate(filePath, activeScene)) {
+                node->addChild(instance);
+                SelectNode(instance);
+            }
+        }
+        ImGui::EndDragDropTarget();
+    }
+
     ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - 44.0f);
     std::string lockLabel = std::string(node->locked ? "L" : "U") + idSuffix + "lock";
     if (ImGui::SmallButton(lockLabel.c_str())) {
@@ -1248,6 +1281,16 @@ void DebugUI::DrawSceneTree(TNode* node, Scene* activeScene, int depth) {
                 if (ImGui::MenuItem("Set as Main Camera", nullptr, false, !isMain)) {
                     activeScene->SetMainCamera(node);
                 }
+            }
+
+            if (ImGui::MenuItem("Create Prefab...")) {
+                // Only raises the flag; DrawCreatePrefabPopup() (called every frame from
+                // DrawFrame) issues the actual OpenPopup. This avoids ID-stack issues when
+                // triggered from inside a context-menu popup that's about to close.
+                creatingPrefabFrom = node;
+                std::string base = node->name.empty() ? "Prefab" : node->name;
+                std::snprintf(createPrefabBuffer, sizeof(createPrefabBuffer), "%s", base.c_str());
+                createPrefabError.clear();
             }
 
             ImGui::Separator();
@@ -1801,6 +1844,48 @@ void DebugUI::DrawSaveMaterialPopup(const std::shared_ptr<Material>& material) {
                 }
             }
         } else if (cancelled) {
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
+}
+
+void DebugUI::DrawCreatePrefabPopup() {
+    if (!creatingPrefabFrom) return;
+
+    ImGui::OpenPopup("Create Prefab##popup");
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+
+    if (ImGui::BeginPopupModal("Create Prefab##popup", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::SetNextItemWidth(240);
+        bool commit = ImGui::InputText("##CreatePrefabInput", createPrefabBuffer, sizeof(createPrefabBuffer),
+            ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+
+        if (!createPrefabError.empty()) {
+            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", createPrefabError.c_str());
+        }
+
+        bool confirmed = ImGui::Button("OK") || commit;
+        ImGui::SameLine();
+        bool cancelled = ImGui::Button("Cancel");
+
+        if (confirmed) {
+            std::string name = createPrefabBuffer;
+            if (name.empty()) {
+                createPrefabError = "Name cannot be empty.";
+            } else {
+                std::string filePath = "resources/prefabs/" + name + ".prefab";
+                if (PrefabSerializer::Save(creatingPrefabFrom, filePath)) {
+                    creatingPrefabFrom = nullptr;
+                    ImGui::CloseCurrentPopup();
+                } else {
+                    createPrefabError = "Failed to save prefab.";
+                }
+            }
+        } else if (cancelled) {
+            creatingPrefabFrom = nullptr;
             ImGui::CloseCurrentPopup();
         }
 

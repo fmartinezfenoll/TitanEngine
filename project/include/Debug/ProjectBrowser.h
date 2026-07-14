@@ -16,6 +16,9 @@ public:
     // Drag-drop payload type for dropping a saved .material asset onto an object's Material slot.
     static constexpr const char* kMaterialPayloadType = "ASSET_MATERIAL_PATH";
 
+    // Drag-drop payload type for dropping a saved .prefab asset onto the Scene Tree to instantiate it.
+    static constexpr const char* kPrefabPayloadType = "ASSET_PREFAB_PATH";
+
     // Generic drag-drop payload type carrying any asset's path, used to move it onto a folder.
     static constexpr const char* kAssetMovePayloadType = "ASSET_MOVE_PATH";
 

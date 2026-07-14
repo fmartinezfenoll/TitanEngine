@@ -48,6 +48,7 @@ private:
     // assetPath != nullptr: editing a standalone .material asset directly -- every changed
     // field auto-saves back to *assetPath immediately.
     static void DrawMaterialFields(const std::shared_ptr<Material>& mat, const std::string* assetPath);
+    static void DrawCreatePrefabPopup();
     static void DrawCreateMenu(TNode* parent, Scene* activeScene);
     static TNode* PickAtCursor(Scene* activeScene);
     static void ComputePickRay(Scene* activeScene, glm::vec3& outOrigin, glm::vec3& outDirection);
@@ -115,4 +116,8 @@ private:
 
     static char saveMaterialBuffer[128];
     static std::string saveMaterialError;
+
+    static TNode* creatingPrefabFrom;
+    static char createPrefabBuffer[128];
+    static std::string createPrefabError;
 };
