@@ -8,6 +8,10 @@
 #include "Scene/MeshComponent.h"
 #include "Scene/MaterialComponent.h"
 #include "Scene/LightComponent.h"
+#include "Scene/AnimationComponent.h"
+#include "Scene/AnimationStateMachine.h"
+#include "Scene/CameraPathComponent.h"
+#include "Scene/PatrolComponent.h"
 #include "ResourceManager/Material.h"
 #include "ResourceManager/MaterialSerializer.h"
 #include "ResourceManager/Texture.h"
@@ -19,6 +23,7 @@
 #include "ResourceManager/CubemapTexture.h"
 #include "Debug/ProjectBrowser.h"
 #include "Debug/MaterialIcons.h"
+#include "Debug/ImGuiLayoutUtils.h"
 #include "Core/Stats.h"
 #include "Core/EngineSettings.h"
 #include "Core/EngineConfig.h"
@@ -34,6 +39,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
+#include <cfloat>
 
 namespace {
 
@@ -187,6 +193,11 @@ TNode* DebugUI::creatingPrefabFrom = nullptr;
 char DebugUI::createPrefabBuffer[128] = "";
 std::string DebugUI::createPrefabError = "";
 
+std::string DebugUI::editingClipName = "";
+float DebugUI::editorScrubTime = 0.0f;
+char DebugUI::newClipNameBuffer[128] = "";
+char DebugUI::newStateNameBuffer[128] = "";
+
 void DebugUI::Init() {
     // ImGui context is already created by OpenGLRenderer
 }
@@ -211,6 +222,14 @@ void DebugUI::ApplyTheme() {
     style.IndentSpacing = 16.0f;
     style.ScrollbarSize = 14.0f;
     style.GrabMinSize = 10.0f;
+
+    // SetNextWindowSizeConstraints (used per-window below) only limits a
+    // FLOATING window's own resize grip -- ImGui's docking splitters ignore
+    // it and instead clamp against this global minimum when the user drags
+    // the divider between two docked panels. Set to the largest per-window
+    // minimum (Inspector's) so no docked panel can be squeezed small enough
+    // to clip its content.
+    style.WindowMinSize = ImVec2(300.0f, 260.0f);
 
     ImVec4* colors = style.Colors;
     const ImVec4 bgDarkest  = ImVec4(0.086f, 0.090f, 0.106f, 1.00f);
@@ -466,6 +485,7 @@ void DebugUI::SelectNode(TNode* node) {
     inspectingMaterial = nullptr;
     gizmoMode = GizmoMode::Move;
     multiSelectedNodes.clear();
+    editingClipName.clear();
 }
 
 bool DebugUI::IsMultiSelected(TNode* node) {
@@ -896,6 +916,7 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
 
     ImGui::SetNextWindowPos(ImVec2(10, 720), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(260, 290), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(220, 180), ImVec2(FLT_MAX, FLT_MAX));
     if (ImGui::Begin("Stats", nullptr)) {
         ImGui::Text("FPS: %.1f", Stats::GetFPS());
         ImGui::Text("Draw calls: %d", Stats::GetDrawCalls());
@@ -1001,6 +1022,7 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
 
     ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(500, 700), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(320, 260), ImVec2(FLT_MAX, FLT_MAX));
 
     if (ImGui::Begin("Scene Debug", nullptr)) {
         // Scene Selector at top
@@ -1086,6 +1108,7 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
 
     ImGui::SetNextWindowPos(ImVec2(10, 730), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(700, 320), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(360, 240), ImVec2(FLT_MAX, FLT_MAX));
     if (ImGui::Begin("Project", nullptr)) {
         ProjectBrowser::Draw(sceneManager, activeScene);
     }
@@ -1191,6 +1214,7 @@ void DebugUI::DrawSceneTree(TNode* node, Scene* activeScene, int depth) {
     label += idSuffix;
 
     bool opened = ImGui::TreeNodeEx(label.c_str(), flags);
+    float labelRightEdge = ImGui::GetItemRectMax().x;
 
     if (ImGui::IsItemClicked()) {
         if (ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeyShift) {
@@ -1212,18 +1236,10 @@ void DebugUI::DrawSceneTree(TNode* node, Scene* activeScene, int depth) {
         ImGui::EndDragDropTarget();
     }
 
-    ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - 44.0f);
-    std::string lockLabel = std::string(node->locked ? "L" : "U") + idSuffix + "lock";
-    if (ImGui::SmallButton(lockLabel.c_str())) {
-        node->locked = !node->locked;
-    }
-
-    ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - 20.0f);
-    std::string visLabel = std::string(node->visible ? "O" : "-") + idSuffix + "vis";
-    if (ImGui::SmallButton(visLabel.c_str())) {
-        node->visible = !node->visible;
-    }
-
+    // Anchored to the TreeNodeEx row itself (via BeginDragDropTarget above, which
+    // doesn't change ImGui's "last item" tracking) so right-clicking anywhere on
+    // the node's name/label opens the menu -- not just the small lock/vis buttons
+    // drawn after it, which BeginPopupContextItem() would otherwise anchor to.
     if (ImGui::BeginPopupContextItem(("NodeContextMenu" + idSuffix).c_str())) {
         if (multiSelectedNodes.empty() || !IsMultiSelected(node)) {
             SelectNode(node);
@@ -1310,6 +1326,25 @@ void DebugUI::DrawSceneTree(TNode* node, Scene* activeScene, int depth) {
         ImGui::EndPopup();
     }
 
+    // Clamped against the label's own right edge (converted from screen-space
+    // to window-space) so these never overlap the node's name/arrow when the
+    // panel is narrow or deeply indented -- GetWindowContentRegionMax().x -
+    // fixedPixels alone can fall behind a long/indented label.
+    float afterLabelX = labelRightEdge - ImGui::GetWindowPos().x;
+    float rightEdge = ImGui::GetWindowContentRegionMax().x;
+
+    ImGui::SameLine(std::max(afterLabelX + 4.0f, rightEdge - 44.0f));
+    std::string lockLabel = std::string(node->locked ? "L" : "U") + idSuffix + "lock";
+    if (ImGui::SmallButton(lockLabel.c_str())) {
+        node->locked = !node->locked;
+    }
+
+    ImGui::SameLine(std::max(afterLabelX + 4.0f, rightEdge - 20.0f));
+    std::string visLabel = std::string(node->visible ? "O" : "-") + idSuffix + "vis";
+    if (ImGui::SmallButton(visLabel.c_str())) {
+        node->visible = !node->visible;
+    }
+
     if ((selectedNode == node || IsMultiSelected(node)) && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)
         && ImGui::IsKeyPressed(ImGuiKey_Delete)) {
         if (!multiSelectedNodes.empty()) {
@@ -1333,6 +1368,7 @@ void DebugUI::DrawInspector(Scene* activeScene) {
 
     ImGui::SetNextWindowPos(ImVec2(520, 10), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(400, 700), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(300, 260), ImVec2(FLT_MAX, FLT_MAX));
 
     if (!inspectingMaterialPath.empty()) {
         if (ImGui::Begin("Inspector", nullptr)) {
@@ -1381,17 +1417,21 @@ void DebugUI::DrawInspector(Scene* activeScene) {
         if (ImGui::CollapsingHeader("Gizmo", ImGuiTreeNodeFlags_DefaultOpen)) {
             ImGui::Indent();
 
+            auto radioWidth = [](const char* label) {
+                return ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x + ImGui::CalcTextSize(label).x;
+            };
+
             ImGui::TextDisabled("Mode");
             if (ImGui::RadioButton("Move (W)", gizmoMode == GizmoMode::Move)) gizmoMode = GizmoMode::Move;
-            ImGui::SameLine();
+            ImGuiLayoutUtils::SameLineOrWrap(radioWidth("Rotate (E)"), false);
             if (ImGui::RadioButton("Rotate (E)", gizmoMode == GizmoMode::Rotate)) gizmoMode = GizmoMode::Rotate;
-            ImGui::SameLine();
+            ImGuiLayoutUtils::SameLineOrWrap(radioWidth("Scale (R)"), false);
             if (ImGui::RadioButton("Scale (R)", gizmoMode == GizmoMode::Scale)) gizmoMode = GizmoMode::Scale;
 
             ImGui::Spacing();
             ImGui::TextDisabled("Space");
             if (ImGui::RadioButton("Global", gizmoSpace == GizmoSpace::Global)) gizmoSpace = GizmoSpace::Global;
-            ImGui::SameLine();
+            ImGuiLayoutUtils::SameLineOrWrap(radioWidth("Local"), false);
             if (ImGui::RadioButton("Local", gizmoSpace == GizmoSpace::Local)) gizmoSpace = GizmoSpace::Local;
 
             ImGui::Spacing();
@@ -1431,12 +1471,13 @@ void DebugUI::DrawInspector(Scene* activeScene) {
             ImGui::SameLine();
             if (ImGui::SmallButton("Reset##scale")) selectedNode->transform.scale = glm::vec3(1.0f);
 
+            float checkboxWidth = ImGui::GetFrameHeight();
             ImGui::TextDisabled("Scale Lock");
-            ImGui::SameLine();
+            ImGuiLayoutUtils::SameLineOrWrap(checkboxWidth, false);
             ImGui::Checkbox("X##scaleLockX", &scaleAxisLocked[0]);
-            ImGui::SameLine();
+            ImGuiLayoutUtils::SameLineOrWrap(checkboxWidth, false);
             ImGui::Checkbox("Y##scaleLockY", &scaleAxisLocked[1]);
-            ImGui::SameLine();
+            ImGuiLayoutUtils::SameLineOrWrap(checkboxWidth, false);
             ImGui::Checkbox("Z##scaleLockZ", &scaleAxisLocked[2]);
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("Check 2 or more axes to scale them together");
@@ -1582,6 +1623,304 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                 }
             }
 
+            if (auto* anim = selectedNode->GetComponent<AnimationComponent>()) {
+                ImGui::Spacing();
+                ImGui::Text("Animation:");
+                ImGui::Indent();
+
+                for (const AnimationClip& clip : anim->GetClips()) {
+                    bool isCurrent = anim->GetCurrentClip() == clip.name;
+                    ImGui::PushID(clip.name.c_str());
+                    ImGui::BulletText("%s (%.2fs)", clip.name.c_str(), clip.duration);
+
+                    bool firstOnRow = true;
+                    if (isCurrent && anim->IsPlaying()) {
+                        ImGuiLayoutUtils::SameLineOrWrap(60.0f, firstOnRow); firstOnRow = false;
+                        if (ImGui::SmallButton("Pause")) anim->Pause();
+                    } else if (isCurrent && anim->IsPaused()) {
+                        ImGuiLayoutUtils::SameLineOrWrap(60.0f, firstOnRow); firstOnRow = false;
+                        if (ImGui::SmallButton("Resume")) anim->Resume();
+                    } else {
+                        ImGuiLayoutUtils::SameLineOrWrap(50.0f, firstOnRow); firstOnRow = false;
+                        if (ImGui::SmallButton("Play")) anim->Play(clip.name, anim->IsLooping());
+                    }
+
+                    if (isCurrent) {
+                        ImGuiLayoutUtils::SameLineOrWrap(60.0f, false);
+                        if (ImGui::SmallButton("Restart")) anim->Restart();
+                    }
+
+                    bool isEditing = editingClipName == clip.name;
+                    ImGuiLayoutUtils::SameLineOrWrap(50.0f, false);
+                    if (ImGui::SmallButton(isEditing ? "Editing" : "Edit")) {
+                        editingClipName = isEditing ? "" : clip.name;
+                        editorScrubTime = 0.0f;
+                    }
+                    ImGui::PopID();
+                }
+
+                if (ImGui::Button("New Clip...##animation")) {
+                    newClipNameBuffer[0] = '\0';
+                    ImGui::OpenPopup("New Animation Clip##popup");
+                }
+                DrawNewAnimationClipPopup(anim);
+
+                bool looping = anim->IsLooping();
+                if (ImGui::Checkbox("Loop##animation", &looping)) {
+                    anim->SetLooping(looping);
+                }
+
+                float speed = anim->GetSpeed();
+                if (ImGui::DragFloat("Speed##animation", &speed, 0.05f, 0.0f, 5.0f)) {
+                    anim->SetSpeed(speed);
+                }
+
+                bool playOnStart = anim->GetPlayOnStart();
+                if (ImGui::Checkbox("Play On Start##animation", &playOnStart)) {
+                    anim->SetPlayOnStart(playOnStart, anim->GetPlayOnStartClip());
+                }
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Auto-plays a clip when the scene loads, without needing code.\nIgnored if this component has a State Machine (its initial state\nplays automatically instead).");
+                }
+                if (playOnStart) {
+                    ImGui::Indent();
+                    ImGui::SetNextItemWidth(160);
+                    std::string startClip = anim->GetPlayOnStartClip();
+                    if (ImGui::BeginCombo("Clip##playOnStart", startClip.empty() ? "(none)" : startClip.c_str())) {
+                        for (const AnimationClip& clip : anim->GetClips()) {
+                            if (ImGui::Selectable(clip.name.c_str(), clip.name == startClip)) {
+                                anim->SetPlayOnStart(true, clip.name);
+                            }
+                        }
+                        ImGui::EndCombo();
+                    }
+                    ImGui::Unindent();
+                }
+
+                if (!anim->GetCurrentClip().empty()) {
+                    float duration = 0.0f;
+                    for (const AnimationClip& clip : anim->GetClips()) {
+                        if (clip.name == anim->GetCurrentClip()) { duration = clip.duration; break; }
+                    }
+                    float progress = duration > 0.0f ? anim->GetCurrentTime() / duration : 0.0f;
+                    ImGui::ProgressBar(progress, ImVec2(-1, 0),
+                        (anim->GetCurrentClip() + " " + std::to_string(anim->GetCurrentTime()).substr(0, 4) + "s").c_str());
+                }
+
+                if (!editingClipName.empty()) {
+                    const AnimationClip* editingClip = nullptr;
+                    for (const AnimationClip& clip : anim->GetClips()) {
+                        if (clip.name == editingClipName) { editingClip = &clip; break; }
+                    }
+
+                    if (editingClip) {
+                        ImGui::Separator();
+                        ImGui::Text("Editing: %s", editingClipName.c_str());
+
+                        // DragFloat, not SliderFloat: a slider's max hard-caps the value you
+                        // can drag to, which would make it impossible to ever place a
+                        // keyframe past the clip's current duration (0s for a brand-new
+                        // clip) -- there'd be no way to extend it. v_max=0 here means no
+                        // upper bound at all (Ctrl+Click still works to type an exact value).
+                        if (ImGui::DragFloat("Time##kfeditor", &editorScrubTime, 0.05f, 0.0f, 0.0f, "%.2fs")) {
+                            editorScrubTime = std::max(editorScrubTime, 0.0f);
+                            anim->PreviewPose(editingClipName, editorScrubTime);
+                        }
+
+                        if (ImGui::Button("Add Keyframe##kfeditor")) {
+                            anim->SetKeyframe(editingClipName, editorScrubTime, selectedNode->transform);
+                        }
+
+                        ImGui::Spacing();
+                        ImGui::TextDisabled("Keyframes:");
+                        for (float t : anim->GetKeyframeTimes(editingClipName)) {
+                            std::string label = std::to_string(t).substr(0, 5) + "s";
+                            ImGui::BulletText("%s", label.c_str());
+
+                            ImGui::Indent();
+                            if (ImGui::SmallButton(("Go##kf" + std::to_string(t)).c_str())) {
+                                editorScrubTime = t;
+                                anim->PreviewPose(editingClipName, t);
+                            }
+                            ImGui::SameLine();
+                            if (ImGui::SmallButton(("Update##kf" + std::to_string(t)).c_str())) {
+                                anim->SetKeyframe(editingClipName, t, selectedNode->transform);
+                            }
+                            ImGui::SameLine();
+                            if (ImGui::SmallButton(("Delete##kf" + std::to_string(t)).c_str())) {
+                                anim->RemoveKeyframe(editingClipName, t);
+                            }
+                            ImGui::Unindent();
+                        }
+                    }
+                }
+
+                ImGui::Spacing();
+                ImGui::Separator();
+                DrawStateMachineEditor(anim);
+
+                ImGui::Unindent();
+            }
+
+            if (auto* patrol = selectedNode->GetComponent<PatrolComponent>()) {
+                ImGui::Spacing();
+                ImGui::Text("Patrol:");
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Remove##patrol")) {
+                    if (activeScene) {
+                        bool stillAnimated = selectedNode->GetComponent<AnimationComponent>() != nullptr
+                            || selectedNode->GetComponent<CameraPathComponent>() != nullptr;
+                        if (!stillAnimated) activeScene->UnregisterAnimator(selectedNode);
+                    }
+                    selectedNode->RemoveComponent<PatrolComponent>();
+                } else {
+                    ImGui::Indent();
+
+                    bool patrolActive = patrol->IsActive();
+                    if (ImGui::Checkbox("Active##patrol", &patrolActive)) {
+                        patrol->SetActive(patrolActive);
+                    }
+
+                    float patrolSpeed = patrol->GetSpeed();
+                    if (ImGui::DragFloat("Speed##patrol", &patrolSpeed, 0.05f, 0.0f, 50.0f)) {
+                        patrol->SetSpeed(patrolSpeed);
+                    }
+
+                    float turnSpeed = patrol->GetTurnSpeed();
+                    if (ImGui::DragFloat("Turn Speed##patrol", &turnSpeed, 1.0f, 0.0f, 720.0f)) {
+                        patrol->SetTurnSpeed(turnSpeed);
+                    }
+
+                    float forwardOffset = patrol->GetForwardOffset();
+                    if (ImGui::DragFloat("Forward Offset##patrol", &forwardOffset, 1.0f, -180.0f, 180.0f, "%.0f deg")) {
+                        patrol->SetForwardOffset(forwardOffset);
+                    }
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip("If the character walks facing backward or sideways relative to\nits travel direction, adjust this (e.g. 180 to flip front/back).");
+                    }
+
+                    ImGui::Text("Waypoint %d/%d  %s", patrol->GetCurrentWaypointIndex() + 1,
+                        static_cast<int>(patrol->GetWaypoints().size()), patrol->IsPaused() ? "(paused)" : "");
+
+                    if (ImGui::Button("Add Waypoint at Current Position##patrol")) {
+                        patrol->AddWaypoint(selectedNode->transform.position, 1.0f);
+                    }
+
+                    ImGui::Spacing();
+                    ImGui::TextDisabled("Waypoints:");
+                    auto& waypoints = patrol->GetWaypointsMutable();
+                    int removeIndex = -1;
+                    for (size_t i = 0; i < waypoints.size(); ++i) {
+                        ImGui::PushID(static_cast<int>(i));
+                        PatrolWaypoint& wp = waypoints[i];
+                        ImGui::DragFloat3("Position##wp", &wp.position.x, 0.1f);
+                        ImGui::SetNextItemWidth(80);
+                        ImGui::DragFloat("Pause##wp", &wp.pauseSeconds, 0.05f, 0.0f, 60.0f);
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton("Remove##wp")) {
+                            removeIndex = static_cast<int>(i);
+                        }
+                        ImGui::PopID();
+                    }
+                    if (removeIndex >= 0) {
+                        patrol->RemoveWaypoint(static_cast<size_t>(removeIndex));
+                    }
+
+                    ImGui::Unindent();
+                }
+            }
+
+            if (auto* cameraPath = selectedNode->GetComponent<CameraPathComponent>()) {
+                ImGui::Spacing();
+                ImGui::Text("Camera Path:");
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Remove##camerapath")) {
+                    if (activeScene) {
+                        bool stillAnimated = selectedNode->GetComponent<AnimationComponent>() != nullptr
+                            || selectedNode->GetComponent<PatrolComponent>() != nullptr;
+                        if (!stillAnimated) activeScene->UnregisterAnimator(selectedNode);
+                    }
+                    selectedNode->RemoveComponent<CameraPathComponent>();
+                } else {
+                    ImGui::Indent();
+
+                    if (!selectedNode->GetComponent<CameraComponent>()) {
+                        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f),
+                            "No Camera component on this node -- path will move it\nbut nothing will look through it.");
+                    }
+
+                    bool loop = cameraPath->IsLooping();
+                    if (ImGui::Checkbox("Loop##camerapath", &loop)) {
+                        cameraPath->SetLooping(loop);
+                    }
+
+                    ImGui::SameLine();
+                    if (cameraPath->IsPlaying()) {
+                        if (ImGui::SmallButton("Stop##camerapath")) cameraPath->Stop();
+                    } else {
+                        if (ImGui::SmallButton("Play##camerapath")) cameraPath->Play();
+                    }
+
+                    ImGui::Text("Segment %d/%d", cameraPath->GetCurrentSegment() + 1,
+                        static_cast<int>(cameraPath->GetPoints().size()));
+
+                    if (ImGui::Button("Add Point at Current Position##camerapath")) {
+                        glm::vec3 lookAt = selectedNode->transform.position + glm::vec3(0.0f, 0.0f, -1.0f);
+                        if (auto* camera = selectedNode->GetComponent<CameraComponent>()) {
+                            lookAt = selectedNode->transform.position + camera->GetForward();
+                        }
+                        cameraPath->AddPoint(selectedNode->transform.position, lookAt, 2.0f, 0.0f);
+                    }
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip("Look-at defaults to the camera's current facing direction\n(or forward along -Z if this node has no Camera component).");
+                    }
+
+                    ImGui::Spacing();
+                    ImGui::TextDisabled("Points:");
+                    auto& points = cameraPath->GetPointsMutable();
+                    int removePointIndex = -1;
+                    for (size_t i = 0; i < points.size(); ++i) {
+                        ImGui::PushID(static_cast<int>(i));
+                        CameraPathPoint& point = points[i];
+
+                        ImGui::Text("Point %d", static_cast<int>(i));
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton("Go##camerapath")) {
+                            selectedNode->transform.position = point.position;
+                            if (auto* camera = selectedNode->GetComponent<CameraComponent>()) {
+                                glm::vec3 dir = point.lookAt - point.position;
+                                if (glm::length(dir) > 1e-4f) {
+                                    dir = glm::normalize(dir);
+                                    camera->yaw = glm::degrees(std::atan2(dir.z, dir.x));
+                                    camera->pitch = glm::degrees(std::asin(std::clamp(dir.y, -1.0f, 1.0f)));
+                                }
+                            }
+                        }
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton("Remove##camerapath")) {
+                            removePointIndex = static_cast<int>(i);
+                        }
+
+                        ImGui::DragFloat3("Position##camerapath", &point.position.x, 0.1f);
+                        ImGui::DragFloat3("Look At##camerapath", &point.lookAt.x, 0.1f);
+
+                        ImGui::SetNextItemWidth(90);
+                        ImGui::DragFloat("Travel (s)##camerapath", &point.travelSeconds, 0.05f, 0.01f, 60.0f);
+                        ImGui::SameLine();
+                        ImGui::SetNextItemWidth(90);
+                        ImGui::DragFloat("Hold (s)##camerapath", &point.holdSeconds, 0.05f, 0.0f, 60.0f);
+
+                        ImGui::Separator();
+                        ImGui::PopID();
+                    }
+                    if (removePointIndex >= 0) {
+                        cameraPath->RemovePoint(static_cast<size_t>(removePointIndex));
+                    }
+
+                    ImGui::Unindent();
+                }
+            }
+
             ImGui::Unindent();
         }
 
@@ -1621,7 +1960,7 @@ void DebugUI::DrawDeleteConfirmation() {
         float buttonWidth = 140.0f;
         float spacing = ImGui::GetStyle().ItemSpacing.x;
         float totalWidth = (buttonWidth * 2) + spacing;
-        ImGui::SetCursorPosX((ImGui::GetWindowSize().x - totalWidth) * 0.5f);
+        ImGui::SetCursorPosX(std::max(0.0f, (ImGui::GetWindowSize().x - totalWidth) * 0.5f));
 
         if (ImGui::Button("Delete Forever", ImVec2(buttonWidth, 0))) {
             SceneManager::Instance().UnloadScene(sceneToDelete);
@@ -1661,7 +2000,7 @@ void DebugUI::DrawSaveConfirmation() {
         float buttonWidth = 140.0f;
         float spacing = ImGui::GetStyle().ItemSpacing.x;
         float totalWidth = (buttonWidth * 2) + spacing;
-        ImGui::SetCursorPosX((ImGui::GetWindowSize().x - totalWidth) * 0.5f);
+        ImGui::SetCursorPosX(std::max(0.0f, (ImGui::GetWindowSize().x - totalWidth) * 0.5f));
 
         if (ImGui::Button("Save", ImVec2(buttonWidth, 0))) {
             std::filesystem::create_directories("scenes");
@@ -1769,6 +2108,21 @@ void DebugUI::DrawAddComponentMenu(TNode* node, Scene* activeScene) {
             ImGui::EndMenu();
         }
 
+        if (!node->GetComponent<AnimationComponent>() && ImGui::MenuItem("Animation")) {
+            node->AddComponent<AnimationComponent>(node);
+            if (activeScene) activeScene->RegisterAnimator(node);
+        }
+
+        if (!node->GetComponent<PatrolComponent>() && ImGui::MenuItem("Patrol")) {
+            node->AddComponent<PatrolComponent>(node);
+            if (activeScene) activeScene->RegisterAnimator(node);
+        }
+
+        if (!node->GetComponent<CameraPathComponent>() && ImGui::MenuItem("Camera Path")) {
+            node->AddComponent<CameraPathComponent>(node);
+            if (activeScene) activeScene->RegisterAnimator(node);
+        }
+
         ImGui::EndMenu();
     }
 }
@@ -1843,6 +2197,202 @@ void DebugUI::DrawSaveMaterialPopup(const std::shared_ptr<Material>& material) {
                     saveMaterialError = "Failed to save material.";
                 }
             }
+        } else if (cancelled) {
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
+}
+
+void DebugUI::DrawStateMachineEditor(AnimationComponent* anim) {
+    ImGui::Spacing();
+    AnimationStateMachine* machine = anim->GetStateMachine();
+
+    if (!machine) {
+        ImGui::TextDisabled("No state machine.");
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Add State Machine##sm")) {
+            anim->GetOrCreateStateMachine();
+        }
+        return;
+    }
+
+    ImGui::Text("State Machine:");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Remove##sm")) {
+        anim->RemoveStateMachine();
+        return;
+    }
+    ImGui::Indent();
+
+    if (!machine->GetCurrentState().empty()) {
+        ImGui::TextDisabled("Current: %s", machine->GetCurrentState().c_str());
+    }
+
+    // --- States ---
+    ImGui::TextDisabled("States:");
+    auto& states = machine->GetStatesMutable();
+    int removeStateIndex = -1;
+    for (size_t i = 0; i < states.size(); ++i) {
+        ImGui::PushID(static_cast<int>(i));
+        AnimationStateMachine::State& state = states[i];
+
+        char nameBuf[128];
+        std::snprintf(nameBuf, sizeof(nameBuf), "%s", state.name.c_str());
+        ImGui::SetNextItemWidth(140);
+        if (ImGui::InputText("##stateName", nameBuf, sizeof(nameBuf))) {
+            state.name = nameBuf;
+        }
+
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(140);
+        if (ImGui::BeginCombo("##stateClip", state.clipName.empty() ? "(clip)" : state.clipName.c_str())) {
+            for (const AnimationClip& clip : anim->GetClips()) {
+                bool isSelected = clip.name == state.clipName;
+                if (ImGui::Selectable(clip.name.c_str(), isSelected)) {
+                    state.clipName = clip.name;
+                }
+            }
+            ImGui::EndCombo();
+        }
+
+        ImGui::SameLine();
+        ImGui::Checkbox("Loop##state", &state.loop);
+
+        ImGui::SameLine();
+        if (ImGui::SmallButton("X##removeState")) {
+            removeStateIndex = static_cast<int>(i);
+        }
+
+        ImGui::PopID();
+    }
+    if (removeStateIndex >= 0) {
+        machine->RemoveState(states[static_cast<size_t>(removeStateIndex)].name);
+    }
+
+    ImGui::SetNextItemWidth(160);
+    ImGui::InputText("##newStateName", newStateNameBuffer, sizeof(newStateNameBuffer));
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Add State##sm") && newStateNameBuffer[0] != '\0') {
+        std::string defaultClip = anim->GetClips().empty() ? "" : anim->GetClips().front().name;
+        machine->AddState(newStateNameBuffer, defaultClip, true);
+        newStateNameBuffer[0] = '\0';
+    }
+
+    // --- Initial state ---
+    ImGui::SetNextItemWidth(160);
+    std::string initial = machine->GetInitialState();
+    if (ImGui::BeginCombo("Initial State##sm", initial.empty() ? "(none)" : initial.c_str())) {
+        for (const auto& state : states) {
+            bool isSelected = state.name == initial;
+            if (ImGui::Selectable(state.name.c_str(), isSelected)) {
+                machine->SetInitialState(state.name);
+            }
+        }
+        ImGui::EndCombo();
+    }
+
+    // --- Transitions ---
+    ImGui::Spacing();
+    ImGui::TextDisabled("Transitions:");
+    auto& transitions = machine->GetTransitionsMutable();
+    int removeTransitionIndex = -1;
+
+    static const char* opLabels[] = { ">", "<", "==", "!=" };
+
+    for (size_t i = 0; i < transitions.size(); ++i) {
+        ImGui::PushID(static_cast<int>(1000 + i));
+        AnimationStateMachine::Transition& transition = transitions[i];
+
+        ImGui::SetNextItemWidth(110);
+        if (ImGui::BeginCombo("##fromState", transition.fromState.empty() ? "Any State" : transition.fromState.c_str())) {
+            if (ImGui::Selectable("Any State", transition.fromState.empty())) transition.fromState = "";
+            for (const auto& state : states) {
+                if (ImGui::Selectable(state.name.c_str(), transition.fromState == state.name)) {
+                    transition.fromState = state.name;
+                }
+            }
+            ImGui::EndCombo();
+        }
+
+        ImGui::SameLine();
+        ImGui::Text("->");
+        ImGui::SameLine();
+
+        ImGui::SetNextItemWidth(110);
+        if (ImGui::BeginCombo("##toState", transition.toState.empty() ? "(none)" : transition.toState.c_str())) {
+            for (const auto& state : states) {
+                if (ImGui::Selectable(state.name.c_str(), transition.toState == state.name)) {
+                    transition.toState = state.name;
+                }
+            }
+            ImGui::EndCombo();
+        }
+
+        ImGui::SameLine();
+        if (ImGui::SmallButton("X##removeTransition")) {
+            removeTransitionIndex = static_cast<int>(i);
+        }
+
+        char paramBuf[128];
+        std::snprintf(paramBuf, sizeof(paramBuf), "%s", transition.parameter.c_str());
+        ImGui::SetNextItemWidth(120);
+        if (ImGui::InputText("Param##transition", paramBuf, sizeof(paramBuf))) {
+            transition.parameter = paramBuf;
+        }
+
+        ImGui::SameLine();
+        int opIndex = static_cast<int>(transition.op);
+        ImGui::SetNextItemWidth(60);
+        if (ImGui::Combo("##transitionOp", &opIndex, opLabels, IM_ARRAYSIZE(opLabels))) {
+            transition.op = static_cast<AnimationStateMachine::ConditionOp>(opIndex);
+        }
+
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(80);
+        ImGui::DragFloat("Threshold##transition", &transition.threshold, 0.05f);
+
+        ImGui::SetNextItemWidth(100);
+        ImGui::DragFloat("Blend (s)##transition", &transition.blendSeconds, 0.02f, 0.0f, 5.0f);
+
+        ImGui::Separator();
+        ImGui::PopID();
+    }
+    if (removeTransitionIndex >= 0) {
+        machine->RemoveTransition(static_cast<size_t>(removeTransitionIndex));
+    }
+
+    if (ImGui::SmallButton("Add Transition##sm") && !states.empty()) {
+        machine->AddTransition("", states.front().name, "", AnimationStateMachine::ConditionOp::Equals, 1.0f, 0.2f);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Parameter names are arbitrary strings set at runtime via code\n(AnimationStateMachine::SetBool/SetFloat), e.g. \"isMoving\".");
+    }
+
+    ImGui::Unindent();
+}
+
+void DebugUI::DrawNewAnimationClipPopup(AnimationComponent* anim) {
+    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+
+    if (ImGui::BeginPopupModal("New Animation Clip##popup", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::SetNextItemWidth(240);
+        bool commit = ImGui::InputText("##NewClipInput", newClipNameBuffer, sizeof(newClipNameBuffer),
+            ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+
+        bool confirmed = ImGui::Button("OK") || commit;
+        ImGui::SameLine();
+        bool cancelled = ImGui::Button("Cancel");
+
+        if (confirmed && newClipNameBuffer[0] != '\0') {
+            AnimationClip clip;
+            clip.name = newClipNameBuffer;
+            anim->AddClip(clip);
+            editingClipName = clip.name;
+            editorScrubTime = 0.0f;
+            ImGui::CloseCurrentPopup();
         } else if (cancelled) {
             ImGui::CloseCurrentPopup();
         }
@@ -1963,7 +2513,7 @@ void DebugUI::DrawNodeDeleteConfirmation() {
         float buttonWidth = 140.0f;
         float spacing = ImGui::GetStyle().ItemSpacing.x;
         float totalWidth = (buttonWidth * 2) + spacing;
-        ImGui::SetCursorPosX((ImGui::GetWindowSize().x - totalWidth) * 0.5f);
+        ImGui::SetCursorPosX(std::max(0.0f, (ImGui::GetWindowSize().x - totalWidth) * 0.5f));
 
         if (ImGui::Button("Delete Forever##node", ImVec2(buttonWidth, 0))) {
             DeleteNode(nodeToDelete, SceneManager::Instance().GetActiveScene());
@@ -2004,7 +2554,7 @@ void DebugUI::DrawMultiDeleteConfirmation() {
         float buttonWidth = 140.0f;
         float spacing = ImGui::GetStyle().ItemSpacing.x;
         float totalWidth = (buttonWidth * 2) + spacing;
-        ImGui::SetCursorPosX((ImGui::GetWindowSize().x - totalWidth) * 0.5f);
+        ImGui::SetCursorPosX(std::max(0.0f, (ImGui::GetWindowSize().x - totalWidth) * 0.5f));
 
         if (ImGui::Button("Delete Forever##multi", ImVec2(buttonWidth, 0))) {
             std::vector<TNode*> toDelete = multiSelectedNodes;
@@ -2188,7 +2738,10 @@ void DebugUI::DrawSceneSelector(SceneManager* sceneManager) {
         ImGui::EndCombo();
     }
 
-    ImGui::SameLine();
+    auto buttonWidth = [](const char* label) {
+        return ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+    };
+
     if (ImGui::Button("New Scene##btn")) {
         static int sceneCounter = 1;
         std::string newSceneName = "Scene_" + std::to_string(sceneCounter++);
@@ -2198,7 +2751,7 @@ void DebugUI::DrawSceneSelector(SceneManager* sceneManager) {
         EngineConfig::Save();
     }
 
-    ImGui::SameLine();
+    ImGuiLayoutUtils::SameLineOrWrap(buttonWidth("Save"), false);
     if (ImGui::Button("Save##btn")) {
         if (sceneManager->GetActiveScene()) {
             static int saveCounter = 0;
@@ -2208,7 +2761,7 @@ void DebugUI::DrawSceneSelector(SceneManager* sceneManager) {
         }
     }
 
-    ImGui::SameLine();
+    ImGuiLayoutUtils::SameLineOrWrap(buttonWidth("Delete"), false);
     if (ImGui::Button("Delete##btn")) {
         if (sceneManager->GetActiveScene()) {
             sceneToDelete = sceneManager->GetActiveSceneName();
@@ -2217,7 +2770,7 @@ void DebugUI::DrawSceneSelector(SceneManager* sceneManager) {
         }
     }
 
-    ImGui::SameLine();
+    ImGuiLayoutUtils::SameLineOrWrap(buttonWidth("Rename"), false);
     if (ImGui::Button("Rename##btn")) {
         if (sceneManager->GetActiveScene()) {
             renamingScene = true;

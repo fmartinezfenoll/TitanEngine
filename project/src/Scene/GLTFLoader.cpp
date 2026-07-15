@@ -2,11 +2,16 @@
 #include "Scene/TNode.h"
 #include "Scene/MeshComponent.h"
 #include "Scene/MaterialComponent.h"
+#include "Scene/SkinComponent.h"
+#include "Scene/AnimationComponent.h"
+#include "Scene/AnimationClip.h"
 #include "ResourceManager/ResourceManager.h"
 #include "ResourceManager/OpenGLShader.h"
 #include "ResourceManager/Material.h"
 #include "ResourceManager/Texture.h"
 #include "Core/Log.h"
+#include <unordered_map>
+#include <algorithm>
 
 #define TINYGLTF_NO_STB_IMAGE
 #define TINYGLTF_NO_STB_IMAGE_WRITE
@@ -107,16 +112,18 @@ std::shared_ptr<Texture> LoadGltfTexture(const tinygltf::Model& model, int textu
 }
 
 std::shared_ptr<Material> ProcessMaterial(const tinygltf::Model& model, int materialIndex,
-                                           const std::string& path, const std::string& baseDir)
+                                           const std::string& path, const std::string& baseDir,
+                                           bool skinned)
 {
-    std::string matName = path + "_mat_" + std::to_string(materialIndex);
+    std::string matName = path + "_mat_" + std::to_string(materialIndex) + (skinned ? "_skinned" : "");
     if (auto existing = ResourceManager::GetMaterial(matName))
         return existing;
 
-    auto shader = ResourceManager::LoadShader("pbr");
+    const char* shaderName = skinned ? "pbr_skinned" : "pbr";
+    auto shader = ResourceManager::LoadShader(shaderName);
     if (!shader)
     {
-        Log::Error("GLTFLoader: pbr shader not found");
+        Log::Error(std::string("GLTFLoader: ") + shaderName + " shader not found");
         return nullptr;
     }
 
@@ -192,6 +199,35 @@ TNode* ProcessMesh(const tinygltf::Primitive& primitive, const tinygltf::Model& 
             vertices[i].uv = glm::vec2(uvs[i * 2], uvs[i * 2 + 1]);
     }
 
+    bool skinned = primitive.attributes.count("JOINTS_0") && primitive.attributes.count("WEIGHTS_0");
+    if (skinned)
+    {
+        const auto& jointsAccessor = model.accessors[primitive.attributes.at("JOINTS_0")];
+        const unsigned char* jointsData = GetAccessorData<unsigned char>(model, primitive.attributes.at("JOINTS_0"));
+        for (size_t i = 0; i < posAccessor.count; ++i)
+        {
+            glm::ivec4 j(0);
+            if (jointsAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE)
+            {
+                j = glm::ivec4(jointsData[i * 4], jointsData[i * 4 + 1], jointsData[i * 4 + 2], jointsData[i * 4 + 3]);
+            }
+            else if (jointsAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT)
+            {
+                const uint16_t* j16 = reinterpret_cast<const uint16_t*>(jointsData);
+                j = glm::ivec4(j16[i * 4], j16[i * 4 + 1], j16[i * 4 + 2], j16[i * 4 + 3]);
+            }
+            vertices[i].jointIndices = j;
+        }
+
+        const auto& weightsAccessor = model.accessors[primitive.attributes.at("WEIGHTS_0")];
+        if (weightsAccessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT)
+        {
+            const float* w = GetAccessorData<float>(model, primitive.attributes.at("WEIGHTS_0"));
+            for (size_t i = 0; i < posAccessor.count; ++i)
+                vertices[i].jointWeights = glm::vec4(w[i * 4], w[i * 4 + 1], w[i * 4 + 2], w[i * 4 + 3]);
+        }
+    }
+
     if (primitive.indices >= 0)
     {
         const auto& accessor = model.accessors[primitive.indices];
@@ -213,7 +249,7 @@ TNode* ProcessMesh(const tinygltf::Primitive& primitive, const tinygltf::Model& 
     if (indices.empty())
         return nullptr;
 
-    auto material = ProcessMaterial(model, primitive.material, path, baseDir);
+    auto material = ProcessMaterial(model, primitive.material, path, baseDir, skinned);
     if (!material)
         return nullptr;
 
@@ -223,8 +259,13 @@ TNode* ProcessMesh(const tinygltf::Primitive& primitive, const tinygltf::Model& 
     return node;
 }
 
+// meshNodeToGltfNode: records, for each synthetic mesh-primitive TNode created,
+// which glTF node it came from -- needed after the fact to attach a SkinComponent
+// to the right TNode (the mesh node, not its container) once all nodes exist.
 std::vector<TNode*> ProcessNode(const tinygltf::Node& gltfNode, const tinygltf::Model& model,
-                                 const std::string& path, const std::string& baseDir, int nodeIndex)
+                                 const std::string& path, const std::string& baseDir, int nodeIndex,
+                                 std::unordered_map<int, TNode*>& nodeIndexMap,
+                                 std::unordered_map<TNode*, int>& meshNodeToGltfNode)
 {
     std::vector<TNode*> result;
 
@@ -236,6 +277,7 @@ std::vector<TNode*> ProcessNode(const tinygltf::Node& gltfNode, const tinygltf::
 
     TNode* container = new TNode(nullptr, nodeName);
     container->transform = GetNodeTransform(gltfNode);
+    nodeIndexMap[nodeIndex] = container;
 
     if (hasMesh)
     {
@@ -250,7 +292,11 @@ std::vector<TNode*> ProcessNode(const tinygltf::Node& gltfNode, const tinygltf::
 
             TNode* meshNode = ProcessMesh(mesh.primitives[primIndex], model, path, baseDir, meshLabel);
             if (meshNode)
+            {
                 container->addChild(meshNode);
+                if (gltfNode.skin >= 0)
+                    meshNodeToGltfNode[meshNode] = gltfNode.skin;
+            }
         }
     }
 
@@ -258,13 +304,151 @@ std::vector<TNode*> ProcessNode(const tinygltf::Node& gltfNode, const tinygltf::
     {
         if (childIndex < 0 || childIndex >= static_cast<int>(model.nodes.size()))
             continue;
-        auto childNodes = ProcessNode(model.nodes[childIndex], model, path, baseDir, childIndex);
+        auto childNodes = ProcessNode(model.nodes[childIndex], model, path, baseDir, childIndex,
+                                       nodeIndexMap, meshNodeToGltfNode);
         for (TNode* child : childNodes)
             container->addChild(child);
     }
 
     result.push_back(container);
     return result;
+}
+
+AnimationInterpolation ParseInterpolation(const std::string& interp)
+{
+    if (interp == "STEP") return AnimationInterpolation::Step;
+    if (interp == "CUBICSPLINE") return AnimationInterpolation::CubicSpline;
+    return AnimationInterpolation::Linear;
+}
+
+// Builds a stable "pre-order position within the animated subtree" index for
+// every node reachable from `root`, matching the traversal order SceneSerializer
+// uses (root=0, then children depth-first) -- so AnimationChannelData::targetNodeIndex
+// survives a save/load round-trip without depending on raw TNode* or glTF's own
+// node indices (see SceneSerializer's post-process resolution pass).
+void BuildPreOrderIndex(TNode* node, int& counter, std::unordered_map<TNode*, int>& outIndex)
+{
+    if (!node) return;
+    outIndex[node] = counter++;
+    for (TNode* child : node->children)
+        BuildPreOrderIndex(child, counter, outIndex);
+}
+
+void ProcessSkins(const tinygltf::Model& model, const std::unordered_map<int, TNode*>& nodeIndexMap,
+                   const std::unordered_map<TNode*, int>& meshNodeToGltfNode)
+{
+    for (const auto& [meshNode, skinIndex] : meshNodeToGltfNode)
+    {
+        if (skinIndex < 0 || skinIndex >= static_cast<int>(model.skins.size()))
+            continue;
+
+        const auto& skin = model.skins[skinIndex];
+
+        std::vector<TNode*> joints;
+        joints.reserve(skin.joints.size());
+        for (int jointNodeIndex : skin.joints)
+        {
+            auto it = nodeIndexMap.find(jointNodeIndex);
+            joints.push_back(it != nodeIndexMap.end() ? it->second : nullptr);
+        }
+
+        std::vector<glm::mat4> inverseBindMatrices(skin.joints.size(), glm::mat4(1.0f));
+        if (skin.inverseBindMatrices >= 0)
+        {
+            const float* raw = GetAccessorData<float>(model, skin.inverseBindMatrices);
+            for (size_t i = 0; i < skin.joints.size(); ++i)
+            {
+                glm::mat4 m;
+                for (int c = 0; c < 16; ++c)
+                    m[c / 4][c % 4] = raw[i * 16 + c];
+                inverseBindMatrices[i] = m;
+            }
+        }
+
+        meshNode->AddComponent<SkinComponent>(std::move(joints), std::move(inverseBindMatrices));
+    }
+}
+
+void ProcessAnimations(const tinygltf::Model& model, TNode* modelRoot,
+                        const std::unordered_map<int, TNode*>& nodeIndexMap)
+{
+    if (model.animations.empty() || !modelRoot) return;
+
+    // Translate the loader's glTF-node-index map into the pre-order index used
+    // by AnimationChannelData (stable across save/load; see SceneSerializer).
+    std::unordered_map<TNode*, int> preOrderIndex;
+    int counter = 0;
+    BuildPreOrderIndex(modelRoot, counter, preOrderIndex);
+
+    auto* animComponent = modelRoot->AddComponent<AnimationComponent>(modelRoot);
+
+    for (size_t animIdx = 0; animIdx < model.animations.size(); ++animIdx)
+    {
+        const auto& gltfAnim = model.animations[animIdx];
+
+        AnimationClip clip;
+        clip.name = gltfAnim.name.empty() ? "Animation_" + std::to_string(animIdx) : gltfAnim.name;
+
+        for (const auto& channel : gltfAnim.channels)
+        {
+            if (channel.target_node < 0 || channel.sampler < 0 ||
+                channel.sampler >= static_cast<int>(gltfAnim.samplers.size()))
+                continue;
+
+            auto nodeIt = nodeIndexMap.find(channel.target_node);
+            if (nodeIt == nodeIndexMap.end()) continue;
+            auto preOrderIt = preOrderIndex.find(nodeIt->second);
+            if (preOrderIt == preOrderIndex.end()) continue;
+
+            AnimationTargetPath targetPath;
+            if (channel.target_path == "translation") targetPath = AnimationTargetPath::Translation;
+            else if (channel.target_path == "rotation") targetPath = AnimationTargetPath::Rotation;
+            else if (channel.target_path == "scale") targetPath = AnimationTargetPath::Scale;
+            else continue; // "weights" (morph targets) out of scope
+
+            const auto& sampler = gltfAnim.samplers[channel.sampler];
+            const auto& timeAccessor = model.accessors[sampler.input];
+            const float* times = GetAccessorData<float>(model, sampler.input);
+
+            AnimationChannelData channelData;
+            channelData.targetNodeIndex = preOrderIt->second;
+            channelData.path = targetPath;
+            channelData.interpolation = ParseInterpolation(sampler.interpolation);
+
+            if (targetPath == AnimationTargetPath::Rotation)
+            {
+                const float* values = GetAccessorData<float>(model, sampler.output);
+                for (size_t i = 0; i < timeAccessor.count; ++i)
+                {
+                    clip.duration = std::max(clip.duration, times[i]);
+                    channelData.quatKeys.push_back({times[i], glm::quat(values[i * 4 + 3], values[i * 4], values[i * 4 + 1], values[i * 4 + 2])});
+                }
+            }
+            else
+            {
+                const float* values = GetAccessorData<float>(model, sampler.output);
+                for (size_t i = 0; i < timeAccessor.count; ++i)
+                {
+                    clip.duration = std::max(clip.duration, times[i]);
+                    channelData.vec3Keys.push_back({times[i], glm::vec3(values[i * 3], values[i * 3 + 1], values[i * 3 + 2])});
+                }
+            }
+
+            clip.channels.push_back(std::move(channelData));
+        }
+
+        if (!clip.channels.empty())
+            animComponent->AddClip(std::move(clip));
+    }
+
+    // The map handed to the component uses glTF node indices directly (not the
+    // pre-order translation) since it's only used in-process, right after this
+    // same LoadModel call -- SetNodeIndexMap's keys must match targetNodeIndex,
+    // so rebuild it keyed by the pre-order index instead.
+    std::unordered_map<int, TNode*> instanceMap;
+    for (const auto& [node, idx] : preOrderIndex)
+        instanceMap[idx] = node;
+    animComponent->SetNodeIndexMap(std::move(instanceMap));
 }
 
 } // namespace
@@ -308,15 +492,25 @@ std::vector<TNode*> GLTFLoader::LoadModel(const std::string& path)
 
     std::string baseDir = fs::path(path).parent_path().string();
 
+    std::unordered_map<int, TNode*> nodeIndexMap;
+    std::unordered_map<TNode*, int> meshNodeToGltfNode;
+
     std::vector<TNode*> nodes;
     const auto& scene = model.scenes[model.defaultScene >= 0 ? model.defaultScene : 0];
     for (int nodeIndex : scene.nodes)
     {
         if (nodeIndex < 0 || nodeIndex >= static_cast<int>(model.nodes.size()))
             continue;
-        auto processed = ProcessNode(model.nodes[nodeIndex], model, path, baseDir, nodeIndex);
+        auto processed = ProcessNode(model.nodes[nodeIndex], model, path, baseDir, nodeIndex,
+                                      nodeIndexMap, meshNodeToGltfNode);
         nodes.insert(nodes.end(), processed.begin(), processed.end());
     }
+
+    if (!model.skins.empty())
+        ProcessSkins(model, nodeIndexMap, meshNodeToGltfNode);
+
+    if (!model.animations.empty() && !nodes.empty())
+        ProcessAnimations(model, nodes.front(), nodeIndexMap);
 
     return nodes;
 }

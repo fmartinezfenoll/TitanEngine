@@ -1,5 +1,6 @@
 #include "Scene/MeshComponent.h"
 #include "Scene/MaterialComponent.h"
+#include "Scene/SkinComponent.h"
 #include "ResourceManager/Material.h"
 #include "ResourceManager/OpenGLShader.h"
 #include "Core/Stats.h"
@@ -65,6 +66,13 @@ MeshComponent::MeshComponent(const std::vector<MeshVertex>& vertices,
         }
     }
 
+    for (const MeshVertex& v : Vertices) {
+        if (v.jointWeights != glm::vec4(0.0f)) {
+            SkinnedMesh = true;
+            break;
+        }
+    }
+
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
     glGenBuffers(1, &EBO);
@@ -88,6 +96,12 @@ MeshComponent::MeshComponent(const std::vector<MeshVertex>& vertices,
 
     glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, sizeof(MeshVertex), (void*)offsetof(MeshVertex, tangent));
     glEnableVertexAttribArray(3);
+
+    glVertexAttribIPointer(4, 4, GL_INT, sizeof(MeshVertex), (void*)offsetof(MeshVertex, jointIndices));
+    glEnableVertexAttribArray(4);
+
+    glVertexAttribPointer(5, 4, GL_FLOAT, GL_FALSE, sizeof(MeshVertex), (void*)offsetof(MeshVertex, jointWeights));
+    glEnableVertexAttribArray(5);
 
     glBindVertexArray(0);
 }
@@ -118,7 +132,8 @@ MeshComponent::~MeshComponent() {
 void MeshComponent::Draw(const glm::mat4& modelMatrix, MaterialComponent* material,
                          const glm::mat4& view, const glm::mat4& projection, const glm::vec3& cameraWorldPos,
                          const std::vector<LightUniformData>& lights,
-                         const ShadowRenderData& shadowData, const IBLRenderData& iblData) const {
+                         const ShadowRenderData& shadowData, const IBLRenderData& iblData,
+                         SkinComponent* skin) const {
     if (!material || !material->material) return;
 
     auto shader = material->material->GetShader();
@@ -129,6 +144,10 @@ void MeshComponent::Draw(const glm::mat4& modelMatrix, MaterialComponent* materi
     shader->SetMat4("view", view);
     shader->SetMat4("model", modelMatrix);
     shader->SetVec3("cameraWorldPos", cameraWorldPos);
+
+    if (SkinnedMesh && skin) {
+        shader->SetMat4Array("jointMatrices", skin->ComputeJointMatrices(glm::inverse(modelMatrix)));
+    }
 
     int lightCount = std::min(static_cast<int>(lights.size()), kMaxLights);
     for (int i = 0; i < lightCount; ++i)
@@ -147,33 +166,45 @@ void MeshComponent::Draw(const glm::mat4& modelMatrix, MaterialComponent* materi
     }
     shader->SetInt("lightCount", lightCount);
 
+    // Every sampler uniform below is always given an explicit, distinct
+    // texture unit -- even when the corresponding feature (shadows/IBL) is
+    // off for this draw. Leaving a sampler uniform at its link-time default
+    // (0) when its "enabled" flag is false means it silently shares unit 0
+    // with albedoMap; a sampler2D and a samplerCube uniform both resolving
+    // to the same unit is a type mismatch that makes the whole draw call
+    // fail with GL_INVALID_OPERATION (no GL error message, no visible
+    // geometry) as soon as anything else populates that unit for real.
     shader->SetBool("hasDirectionalShadow", shadowData.hasDirectional);
+    shader->SetInt("directionalShadowMap", static_cast<int>(shadowData.hasDirectional ? shadowData.directionalSlot : 3));
     if (shadowData.hasDirectional) {
-        shader->SetInt("directionalShadowMap", static_cast<int>(shadowData.directionalSlot));
         shader->SetMat4("directionalLightSpaceMatrix", shadowData.directionalLightSpaceMatrix);
     }
 
     shader->SetInt("spotShadowCount", shadowData.spotCount);
-    for (int i = 0; i < shadowData.spotCount; ++i) {
+    for (int i = 0; i < 2; ++i) {
         std::string idx = "[" + std::to_string(i) + "]";
-        shader->SetInt("spotShadowMaps" + idx, static_cast<int>(shadowData.spotSlots[i]));
-        shader->SetMat4("spotLightSpaceMatrices" + idx, shadowData.spotLightSpaceMatrices[i]);
+        unsigned int unit = (i < shadowData.spotCount) ? shadowData.spotSlots[i] : static_cast<unsigned int>(4 + i);
+        shader->SetInt("spotShadowMaps" + idx, static_cast<int>(unit));
+        if (i < shadowData.spotCount) {
+            shader->SetMat4("spotLightSpaceMatrices" + idx, shadowData.spotLightSpaceMatrices[i]);
+        }
     }
 
     shader->SetInt("pointShadowCount", shadowData.pointCount);
-    for (int i = 0; i < shadowData.pointCount; ++i) {
+    for (int i = 0; i < 2; ++i) {
         std::string idx = "[" + std::to_string(i) + "]";
-        shader->SetInt("pointShadowMaps" + idx, static_cast<int>(shadowData.pointSlots[i]));
-        shader->SetVec3("pointShadowLightPos" + idx, shadowData.pointLightPos[i]);
-        shader->SetFloat("pointShadowFarPlane" + idx, shadowData.pointFarPlane[i]);
+        unsigned int unit = (i < shadowData.pointCount) ? shadowData.pointSlots[i] : static_cast<unsigned int>(6 + i);
+        shader->SetInt("pointShadowMaps" + idx, static_cast<int>(unit));
+        if (i < shadowData.pointCount) {
+            shader->SetVec3("pointShadowLightPos" + idx, shadowData.pointLightPos[i]);
+            shader->SetFloat("pointShadowFarPlane" + idx, shadowData.pointFarPlane[i]);
+        }
     }
 
     shader->SetBool("hasIBL", iblData.hasIBL);
-    if (iblData.hasIBL) {
-        shader->SetInt("irradianceMap", static_cast<int>(iblData.irradianceSlot));
-        shader->SetInt("prefilterMap", static_cast<int>(iblData.prefilterSlot));
-        shader->SetInt("brdfLUT", static_cast<int>(iblData.brdfLUTSlot));
-    }
+    shader->SetInt("irradianceMap", static_cast<int>(iblData.irradianceSlot));
+    shader->SetInt("prefilterMap", static_cast<int>(iblData.prefilterSlot));
+    shader->SetInt("brdfLUT", static_cast<int>(iblData.brdfLUTSlot));
 
     glBindVertexArray(VAO);
     glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(IndexCount), GL_UNSIGNED_INT, 0);

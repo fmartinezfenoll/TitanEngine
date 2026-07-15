@@ -36,6 +36,10 @@ public:
     void UnregisterLight(TNode* lightNode);
     const std::vector<TNode*>& GetLights() const { return lights; }
 
+    void RegisterAnimator(TNode* node);
+    void UnregisterAnimator(TNode* node);
+    const std::vector<TNode*>& GetAnimators() const { return animatedNodes; }
+
     void SetSkybox(std::shared_ptr<Skybox> newSkybox) { skybox = std::move(newSkybox); }
     Skybox* GetSkybox() const { return skybox.get(); }
 
@@ -50,6 +54,7 @@ private:
     std::vector<TNode*> cameras;
     TNode* mainCamera = nullptr;
     std::vector<TNode*> lights;
+    std::vector<TNode*> animatedNodes;
     std::shared_ptr<Skybox> skybox;
     bool showGrid = true;
     glm::vec3 clearColor{0.1f, 0.1f, 0.15f};

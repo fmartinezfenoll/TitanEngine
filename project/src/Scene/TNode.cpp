@@ -1,6 +1,7 @@
 #include "Scene/TNode.h"
 #include "Scene/MeshComponent.h"
 #include "Scene/MaterialComponent.h"
+#include "Scene/SkinComponent.h"
 #include "ResourceManager/Material.h"
 #include "Core/EngineSettings.h"
 
@@ -54,7 +55,8 @@ void TNode::draw(const Frustum& frustum, const glm::mat4& view, const glm::mat4&
                 if (isTransparent && outTransparent) {
                     outTransparent->push_back({this, modelMatrix});
                 } else {
-                    mesh->Draw(modelMatrix, materialComp, view, projection, cameraWorldPos, lights, shadowData, iblData);
+                    mesh->Draw(modelMatrix, materialComp, view, projection, cameraWorldPos, lights, shadowData, iblData,
+                               GetComponent<SkinComponent>());
                 }
             }
         }

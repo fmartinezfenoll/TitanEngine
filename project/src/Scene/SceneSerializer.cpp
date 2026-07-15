@@ -5,6 +5,12 @@
 #include "Scene/MaterialComponent.h"
 #include "Scene/CameraComponent.h"
 #include "Scene/LightComponent.h"
+#include "Scene/AnimationComponent.h"
+#include "Scene/AnimationClip.h"
+#include "Scene/AnimationStateMachine.h"
+#include "Scene/CameraPathComponent.h"
+#include "Scene/SkinComponent.h"
+#include "Scene/PatrolComponent.h"
 #include "ResourceManager/ResourceManager.h"
 #include "ResourceManager/Material.h"
 #include "ResourceManager/OpenGLShader.h"
@@ -15,6 +21,8 @@
 #include <json.hpp>
 #include <fstream>
 #include <filesystem>
+#include <unordered_map>
+#include <functional>
 
 using json = nlohmann::json;
 
@@ -122,6 +130,17 @@ json SerializeComponents(const TNode* node) {
         j["vertices"] = vertices;
         j["indices"] = mesh->GetIndices();
 
+        if (mesh->HasSkinning()) {
+            json joints = json::array();
+            json weights = json::array();
+            for (const MeshVertex& v : mesh->GetVertices()) {
+                joints.push_back({v.jointIndices.x, v.jointIndices.y, v.jointIndices.z, v.jointIndices.w});
+                weights.push_back({v.jointWeights.x, v.jointWeights.y, v.jointWeights.z, v.jointWeights.w});
+            }
+            j["joints"] = joints;
+            j["weights"] = weights;
+        }
+
         arr.push_back(j);
     }
 
@@ -196,8 +215,174 @@ json SerializeComponents(const TNode* node) {
         arr.push_back(j);
     }
 
+    if (auto* anim = node->GetComponent<AnimationComponent>()) {
+        json j;
+        j["type"] = "animation";
+        j["playOnStart"] = anim->GetPlayOnStart();
+        j["playOnStartClip"] = anim->GetPlayOnStartClip();
+
+        json clipsJson = json::array();
+        for (const AnimationClip& clip : anim->GetClips()) {
+            json clipJson;
+            clipJson["name"] = clip.name;
+            clipJson["duration"] = clip.duration;
+
+            json channelsJson = json::array();
+            for (const AnimationChannelData& channel : clip.channels) {
+                json cj;
+                cj["targetNodeIndex"] = channel.targetNodeIndex;
+                cj["path"] = static_cast<int>(channel.path);
+                cj["interpolation"] = static_cast<int>(channel.interpolation);
+
+                if (channel.path == AnimationTargetPath::Rotation) {
+                    json keys = json::array();
+                    for (const auto& k : channel.quatKeys) {
+                        keys.push_back({k.time, k.value.w, k.value.x, k.value.y, k.value.z});
+                    }
+                    cj["quatKeys"] = keys;
+                } else {
+                    json keys = json::array();
+                    for (const auto& k : channel.vec3Keys) {
+                        keys.push_back({k.time, k.value.x, k.value.y, k.value.z});
+                    }
+                    cj["vec3Keys"] = keys;
+                }
+
+                channelsJson.push_back(cj);
+            }
+            clipJson["channels"] = channelsJson;
+            clipsJson.push_back(clipJson);
+        }
+        j["clips"] = clipsJson;
+
+        if (const AnimationStateMachine* machine = anim->GetStateMachine()) {
+            json smJson;
+            smJson["initialState"] = machine->GetInitialState();
+
+            json statesJson = json::array();
+            for (const auto& state : machine->GetStates()) {
+                statesJson.push_back({{"name", state.name}, {"clip", state.clipName}, {"loop", state.loop}});
+            }
+            smJson["states"] = statesJson;
+
+            json transitionsJson = json::array();
+            for (const auto& transition : machine->GetTransitions()) {
+                transitionsJson.push_back({
+                    {"fromState", transition.fromState},
+                    {"toState", transition.toState},
+                    {"parameter", transition.parameter},
+                    {"op", static_cast<int>(transition.op)},
+                    {"threshold", transition.threshold},
+                    {"blendSeconds", transition.blendSeconds}
+                });
+            }
+            smJson["transitions"] = transitionsJson;
+
+            j["stateMachine"] = smJson;
+        }
+
+        arr.push_back(j);
+    }
+
+    if (auto* skin = node->GetComponent<SkinComponent>()) {
+        json j;
+        j["type"] = "skin";
+
+        // Joints are stored as indices into a pre-order walk of the MESH NODE'S
+        // OWN root ancestor -- specifically, the nearest ancestor (or itself)
+        // that owns an AnimationComponent, which is always the model's root and
+        // matches the same pre-order numbering GLTFLoader::ProcessAnimations
+        // already uses. Resolved by a post-process pass in LoadScene/DuplicateNode/
+        // DeserializeNodeFromString once the whole subtree exists.
+        const TNode* animRoot = node;
+        while (animRoot->parent && !animRoot->GetComponent<AnimationComponent>()) {
+            animRoot = animRoot->parent;
+        }
+
+        std::unordered_map<const TNode*, int> preOrder;
+        int counter = 0;
+        std::function<void(const TNode*)> walk = [&](const TNode* n) {
+            preOrder[n] = counter++;
+            for (const TNode* child : n->children) walk(child);
+        };
+        walk(animRoot);
+
+        json jointsJson = json::array();
+        const auto& joints = skin->GetJoints();
+        const auto& invBind = skin->GetInverseBindMatrices();
+        for (size_t i = 0; i < joints.size(); ++i) {
+            json jj;
+            auto it = joints[i] ? preOrder.find(joints[i]) : preOrder.end();
+            jj["nodeIndex"] = (it != preOrder.end()) ? it->second : -1;
+
+            json m = json::array();
+            const glm::mat4& mat = invBind[i];
+            for (int c = 0; c < 4; ++c)
+                for (int r = 0; r < 4; ++r)
+                    m.push_back(mat[c][r]);
+            jj["inverseBindMatrix"] = m;
+
+            jointsJson.push_back(jj);
+        }
+        j["joints"] = jointsJson;
+
+        arr.push_back(j);
+    }
+
+    if (auto* patrol = node->GetComponent<PatrolComponent>()) {
+        json j;
+        j["type"] = "patrol";
+        j["speed"] = patrol->GetSpeed();
+        j["turnSpeed"] = patrol->GetTurnSpeed();
+        j["forwardOffset"] = patrol->GetForwardOffset();
+        j["active"] = patrol->IsActive();
+
+        json waypointsJson = json::array();
+        for (const PatrolWaypoint& wp : patrol->GetWaypoints()) {
+            json wj;
+            wj["position"] = {wp.position.x, wp.position.y, wp.position.z};
+            wj["pause"] = wp.pauseSeconds;
+            waypointsJson.push_back(wj);
+        }
+        j["waypoints"] = waypointsJson;
+
+        arr.push_back(j);
+    }
+
+    if (auto* cameraPath = node->GetComponent<CameraPathComponent>()) {
+        json j;
+        j["type"] = "cameraPath";
+        j["loop"] = cameraPath->IsLooping();
+
+        json pointsJson = json::array();
+        for (const CameraPathPoint& point : cameraPath->GetPoints()) {
+            json pj;
+            pj["position"] = {point.position.x, point.position.y, point.position.z};
+            pj["lookAt"] = {point.lookAt.x, point.lookAt.y, point.lookAt.z};
+            pj["travelSeconds"] = point.travelSeconds;
+            pj["holdSeconds"] = point.holdSeconds;
+            pointsJson.push_back(pj);
+        }
+        j["points"] = pointsJson;
+
+        arr.push_back(j);
+    }
+
     return arr;
 }
+
+// Nodes with a freshly-deserialized AnimationComponent, and pending SkinComponent
+// joint data (pre-order indices not yet resolved to TNode*) -- both are resolved
+// in one pass, per animated-subtree root, by ResolvePendingAnimationData() once
+// the whole node tree exists (see DeserializeNode's post-order return point).
+thread_local std::vector<TNode*> g_pendingAnimationRoots;
+
+struct PendingSkin {
+    TNode* meshNode;
+    std::vector<int> jointPreOrderIndices;
+    std::vector<glm::mat4> inverseBindMatrices;
+};
+thread_local std::vector<PendingSkin> g_pendingSkins;
 
 void DeserializeComponents(TNode* node, Scene* scene, const json& j) {
     if (!j.is_array()) return;
@@ -218,6 +403,17 @@ void DeserializeComponents(TNode* node, Scene* scene, const json& j) {
                 vertices.push_back(v);
             }
             std::vector<uint32_t> indices = compJson["indices"].get<std::vector<uint32_t>>();
+
+            if (compJson.contains("joints") && compJson.contains("weights")) {
+                const auto& jointsArr = compJson["joints"];
+                const auto& weightsArr = compJson["weights"];
+                for (size_t i = 0; i < vertices.size() && i < jointsArr.size() && i < weightsArr.size(); ++i) {
+                    const auto& ja = jointsArr[i];
+                    const auto& wa = weightsArr[i];
+                    vertices[i].jointIndices = glm::ivec4(ja[0], ja[1], ja[2], ja[3]);
+                    vertices[i].jointWeights = glm::vec4(wa[0], wa[1], wa[2], wa[3]);
+                }
+            }
 
             node->AddComponent<MeshComponent>(vertices, indices);
         }
@@ -280,7 +476,194 @@ void DeserializeComponents(TNode* node, Scene* scene, const json& j) {
                 scene->RegisterLight(node);
             }
         }
+        else if (type == "animation" && compJson.contains("clips")) {
+            auto* anim = node->AddComponent<AnimationComponent>(node);
+
+            for (const auto& clipJson : compJson["clips"]) {
+                AnimationClip clip;
+                clip.name = clipJson.value("name", "");
+                clip.duration = clipJson.value("duration", 0.0f);
+
+                if (clipJson.contains("channels")) {
+                    for (const auto& cj : clipJson["channels"]) {
+                        AnimationChannelData channel;
+                        channel.targetNodeIndex = cj.value("targetNodeIndex", -1);
+                        channel.path = static_cast<AnimationTargetPath>(cj.value("path", 0));
+                        channel.interpolation = static_cast<AnimationInterpolation>(cj.value("interpolation", 0));
+
+                        if (cj.contains("quatKeys")) {
+                            for (const auto& k : cj["quatKeys"]) {
+                                AnimationKeyframeQuat kf;
+                                kf.time = k[0];
+                                kf.value = glm::quat(k[1], k[2], k[3], k[4]);
+                                channel.quatKeys.push_back(kf);
+                            }
+                        }
+                        if (cj.contains("vec3Keys")) {
+                            for (const auto& k : cj["vec3Keys"]) {
+                                AnimationKeyframeVec3 kf;
+                                kf.time = k[0];
+                                kf.value = glm::vec3(k[1], k[2], k[3]);
+                                channel.vec3Keys.push_back(kf);
+                            }
+                        }
+
+                        clip.channels.push_back(std::move(channel));
+                    }
+                }
+
+                anim->AddClip(std::move(clip));
+            }
+
+            if (compJson.contains("playOnStart")) {
+                anim->SetPlayOnStart(compJson.value("playOnStart", false), compJson.value("playOnStartClip", ""));
+            }
+
+            if (compJson.contains("stateMachine")) {
+                const auto& smJson = compJson["stateMachine"];
+                AnimationStateMachine* machine = anim->GetOrCreateStateMachine();
+
+                if (smJson.contains("states")) {
+                    for (const auto& sj : smJson["states"]) {
+                        machine->AddState(sj.value("name", ""), sj.value("clip", ""), sj.value("loop", true));
+                    }
+                }
+                if (smJson.contains("transitions")) {
+                    for (const auto& tj : smJson["transitions"]) {
+                        machine->AddTransition(
+                            tj.value("fromState", ""),
+                            tj.value("toState", ""),
+                            tj.value("parameter", ""),
+                            static_cast<AnimationStateMachine::ConditionOp>(tj.value("op", 2)),
+                            tj.value("threshold", 0.0f),
+                            tj.value("blendSeconds", 0.2f));
+                    }
+                }
+                if (smJson.contains("initialState")) {
+                    machine->SetInitialState(smJson["initialState"]);
+                }
+            }
+
+            if (scene) {
+                scene->RegisterAnimator(node);
+            }
+            g_pendingAnimationRoots.push_back(node);
+        }
+        else if (type == "skin" && compJson.contains("joints")) {
+            std::vector<int> jointPreOrderIndices;
+            std::vector<glm::mat4> inverseBindMatrices;
+
+            for (const auto& jj : compJson["joints"]) {
+                jointPreOrderIndices.push_back(jj.value("nodeIndex", -1));
+
+                glm::mat4 m(1.0f);
+                if (jj.contains("inverseBindMatrix")) {
+                    const auto& arr = jj["inverseBindMatrix"];
+                    for (int c = 0; c < 4; ++c)
+                        for (int r = 0; r < 4; ++r)
+                            m[c][r] = arr[c * 4 + r];
+                }
+                inverseBindMatrices.push_back(m);
+            }
+
+            g_pendingSkins.push_back({node, std::move(jointPreOrderIndices), std::move(inverseBindMatrices)});
+        }
+        else if (type == "patrol") {
+            auto* patrol = node->AddComponent<PatrolComponent>(node);
+            if (compJson.contains("speed")) patrol->SetSpeed(compJson["speed"]);
+            if (compJson.contains("turnSpeed")) patrol->SetTurnSpeed(compJson["turnSpeed"]);
+            if (compJson.contains("forwardOffset")) patrol->SetForwardOffset(compJson["forwardOffset"]);
+            if (compJson.contains("active")) patrol->SetActive(compJson["active"]);
+
+            if (compJson.contains("waypoints")) {
+                for (const auto& wj : compJson["waypoints"]) {
+                    glm::vec3 pos(0.0f);
+                    if (wj.contains("position") && wj["position"].is_array()) {
+                        auto p = wj["position"];
+                        pos = glm::vec3(p[0], p[1], p[2]);
+                    }
+                    float pause = wj.value("pause", 0.0f);
+                    patrol->AddWaypoint(pos, pause);
+                }
+            }
+
+            if (scene) {
+                scene->RegisterAnimator(node);
+            }
+        }
+        else if (type == "cameraPath") {
+            auto* cameraPath = node->AddComponent<CameraPathComponent>(node);
+            if (compJson.contains("loop")) cameraPath->SetLooping(compJson["loop"]);
+
+            if (compJson.contains("points")) {
+                for (const auto& pj : compJson["points"]) {
+                    glm::vec3 pos(0.0f), lookAt(0.0f);
+                    if (pj.contains("position") && pj["position"].is_array()) {
+                        auto p = pj["position"];
+                        pos = glm::vec3(p[0], p[1], p[2]);
+                    }
+                    if (pj.contains("lookAt") && pj["lookAt"].is_array()) {
+                        auto l = pj["lookAt"];
+                        lookAt = glm::vec3(l[0], l[1], l[2]);
+                    }
+                    float travelSeconds = pj.value("travelSeconds", 2.0f);
+                    float holdSeconds = pj.value("holdSeconds", 0.0f);
+                    cameraPath->AddPoint(pos, lookAt, travelSeconds, holdSeconds);
+                }
+            }
+
+            if (scene) {
+                scene->RegisterAnimator(node);
+            }
+        }
     }
+}
+
+// Called once after a full node tree has been deserialized (by LoadScene,
+// DuplicateNode, or DeserializeNodeFromString) to resolve every pending
+// AnimationComponent's node-index map and every pending SkinComponent's joint
+// list, now that the whole subtree actually exists. Pre-order numbering is
+// rebuilt per animated-subtree root, matching how GLTFLoader numbered them
+// originally (root = 0, then children depth-first).
+void ResolvePendingAnimationData() {
+    for (TNode* animRoot : g_pendingAnimationRoots) {
+        auto* anim = animRoot->GetComponent<AnimationComponent>();
+        if (!anim) continue;
+
+        std::unordered_map<int, TNode*> preOrderToNode;
+        int counter = 0;
+        std::function<void(TNode*)> walk = [&](TNode* n) {
+            preOrderToNode[counter++] = n;
+            for (TNode* child : n->children) walk(child);
+        };
+        walk(animRoot);
+
+        anim->SetNodeIndexMap(preOrderToNode);
+
+        for (auto& pending : g_pendingSkins) {
+            if (!pending.meshNode) continue; // already resolved under another root
+
+            // A skin's mesh node belongs to this animated subtree if it's
+            // reachable from animRoot -- check via the pre-order map we just built.
+            bool inThisSubtree = false;
+            for (const auto& [idx, n] : preOrderToNode) {
+                if (n == pending.meshNode) { inThisSubtree = true; break; }
+            }
+            if (!inThisSubtree) continue;
+
+            std::vector<TNode*> joints;
+            joints.reserve(pending.jointPreOrderIndices.size());
+            for (int idx : pending.jointPreOrderIndices) {
+                auto it = preOrderToNode.find(idx);
+                joints.push_back(it != preOrderToNode.end() ? it->second : nullptr);
+            }
+            pending.meshNode->AddComponent<SkinComponent>(std::move(joints), std::move(pending.inverseBindMatrices));
+            pending.meshNode = nullptr;
+        }
+    }
+
+    g_pendingAnimationRoots.clear();
+    g_pendingSkins.clear();
 }
 
 json SerializeNode(const TNode* node) {
@@ -451,6 +834,7 @@ Scene* SceneSerializer::LoadScene(const std::string& filePath) {
                 scene->GetRoot()->addChild(root);
             }
         }
+        ResolvePendingAnimationData();
 
         Log::Info("Scene loaded from: " + filePath);
         return scene;
@@ -465,7 +849,9 @@ TNode* SceneSerializer::DuplicateNode(const TNode* node, Scene* scene) {
 
     try {
         json j = SerializeNode(node);
-        return DeserializeNode(j, scene);
+        TNode* result = DeserializeNode(j, scene);
+        ResolvePendingAnimationData();
+        return result;
     } catch (const std::exception& e) {
         Log::Error(std::string("Error duplicating node: ") + e.what());
         return nullptr;
@@ -480,7 +866,9 @@ std::string SceneSerializer::SerializeNodeToString(const TNode* node) {
 TNode* SceneSerializer::DeserializeNodeFromString(const std::string& jsonStr, Scene* scene) {
     try {
         json j = json::parse(jsonStr);
-        return DeserializeNode(j, scene);
+        TNode* result = DeserializeNode(j, scene);
+        ResolvePendingAnimationData();
+        return result;
     } catch (const std::exception& e) {
         Log::Error(std::string("Error pasting node: ") + e.what());
         return nullptr;

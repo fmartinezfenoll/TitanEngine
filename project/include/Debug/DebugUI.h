@@ -120,4 +120,16 @@ private:
     static TNode* creatingPrefabFrom;
     static char createPrefabBuffer[128];
     static std::string createPrefabError;
+
+    // Keyframe editor state (Inspector's Animation section). Not persisted --
+    // reset whenever selection changes.
+    static std::string editingClipName; // empty = no clip is being edited
+    static float editorScrubTime;
+    static char newClipNameBuffer[128];
+    static void DrawNewAnimationClipPopup(class AnimationComponent* anim);
+
+    // State machine editor state (Inspector's Animation section). Not
+    // persisted -- reset whenever selection changes.
+    static char newStateNameBuffer[128];
+    static void DrawStateMachineEditor(class AnimationComponent* anim);
 };

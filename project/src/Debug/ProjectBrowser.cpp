@@ -14,6 +14,7 @@
 #include "ResourceManager/Texture.h"
 #include "ResourceManager/OpenGLShader.h"
 #include "Debug/MaterialIcons.h"
+#include "Debug/ImGuiLayoutUtils.h"
 #include <imgui.h>
 #include <cstdio>
 #include <cstdlib>
@@ -145,7 +146,6 @@ void ProjectBrowser::Draw(SceneManager* sceneManager, Scene* activeScene) {
     ProcessPendingDrops();
 
     DrawRoots();
-    ImGui::SameLine();
     DrawBreadcrumb();
 
     DrawToolbar(sceneManager);
@@ -153,7 +153,13 @@ void ProjectBrowser::Draw(SceneManager* sceneManager, Scene* activeScene) {
     ImGui::Separator();
 
     constexpr float kDetailsWidth = 220.0f;
-    ImGui::BeginChild("ProjectGrid", ImVec2(-kDetailsWidth, 0), true);
+    // Below this width, a fixed 220px side panel would squeeze the grid to
+    // nothing (or negative width) -- stack the details panel under the grid
+    // instead, and only when something's actually selected to show there.
+    bool sideBySide = ImGui::GetContentRegionAvail().x >= kDetailsWidth * 2.0f;
+
+    ImVec2 gridSize = sideBySide ? ImVec2(-kDetailsWidth, 0) : ImVec2(0, selectedPath.empty() ? 0 : -150.0f);
+    ImGui::BeginChild("ProjectGrid", gridSize, true);
     DrawGrid(sceneManager, activeScene);
     bool gridFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
     ImGui::EndChild();
@@ -170,10 +176,16 @@ void ProjectBrowser::Draw(SceneManager* sceneManager, Scene* activeScene) {
         }
     }
 
-    ImGui::SameLine();
-    ImGui::BeginChild("AssetDetails", ImVec2(0, 0), true);
-    DrawDetailsPanel();
-    ImGui::EndChild();
+    if (sideBySide) {
+        ImGui::SameLine();
+        ImGui::BeginChild("AssetDetails", ImVec2(0, 0), true);
+        DrawDetailsPanel();
+        ImGui::EndChild();
+    } else if (!selectedPath.empty()) {
+        ImGui::BeginChild("AssetDetails", ImVec2(0, 0), true);
+        DrawDetailsPanel();
+        ImGui::EndChild();
+    }
 
     DrawRenamePopup(sceneManager);
     DrawDeleteConfirm(sceneManager);
@@ -298,20 +310,27 @@ void ProjectBrowser::DrawRoots() {
 }
 
 void ProjectBrowser::DrawBreadcrumb() {
-    ImGui::SameLine();
+    ImGuiLayoutUtils::SameLineOrWrap(ImGui::CalcTextSize("|").x, false);
     ImGui::TextDisabled("|");
 
+    auto buttonWidth = [](const std::string& label) {
+        return ImGui::CalcTextSize(label.c_str()).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+    };
+
     // Each path segment is a clickable button that jumps to that ancestor folder.
+    // Wraps to a new breadcrumb line instead of overflowing for deeply nested paths.
     std::filesystem::path accumulated;
     int index = 0;
     for (auto it = currentDir.begin(); it != currentDir.end(); ++it, ++index) {
         accumulated /= *it;
-        ImGui::SameLine();
+        std::string segment = it->string();
+
         if (index > 0) {
+            ImGuiLayoutUtils::SameLineOrWrap(ImGui::CalcTextSize("/").x, false);
             ImGui::TextUnformatted("/");
-            ImGui::SameLine();
         }
-        std::string label = it->string() + "##crumb" + std::to_string(index);
+        ImGuiLayoutUtils::SameLineOrWrap(buttonWidth(segment), false);
+        std::string label = segment + "##crumb" + std::to_string(index);
         if (ImGui::SmallButton(label.c_str())) {
             currentDir = accumulated;
             selectedPath.clear();
@@ -319,7 +338,7 @@ void ProjectBrowser::DrawBreadcrumb() {
         }
     }
 
-    ImGui::SameLine();
+    ImGuiLayoutUtils::SameLineOrWrap(buttonWidth("Up"), false);
     if (ImGui::SmallButton("Up##breadcrumb")) {
         std::filesystem::path parent = currentDir.parent_path();
         if (!parent.empty() && parent != currentDir) {
@@ -374,35 +393,41 @@ void ProjectBrowser::DrawToolbar(SceneManager* sceneManager) {
     bool insideScenes = CurrentDirHasSegment(currentDir, "scenes");
     bool insideMaterials = CurrentDirHasSegment(currentDir, "materials");
 
+    auto buttonWidth = [](const char* label) {
+        return ImGui::CalcTextSize(label).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+    };
+
+    bool isFirst = true;
+
     if (insideScenes) {
         if (ImGui::Button("New Scene##project")) {
             CreateNewScene(sceneManager);
         }
+        isFirst = false;
     }
 
     if (insideMaterials) {
-        ImGui::SameLine();
+        ImGuiLayoutUtils::SameLineOrWrap(buttonWidth("New Material"), isFirst);
         if (ImGui::Button("New Material##project")) {
             CreateNewMaterial();
         }
+        isFirst = false;
     }
 
-    if (insideScenes || insideMaterials) {
-        ImGui::SameLine();
-    }
+    ImGuiLayoutUtils::SameLineOrWrap(buttonWidth("New Folder"), isFirst);
     if (ImGui::Button("New Folder##project")) {
         OpenNewFolderPopup();
     }
 
-    ImGui::SameLine();
+    ImGuiLayoutUtils::SameLineOrWrap(200.0f, false);
     ImGui::SetNextItemWidth(200);
     ImGui::InputTextWithHint("##ProjectSearch", "Search...", searchFilter, sizeof(searchFilter));
 
-    ImGui::SameLine();
+    ImGuiLayoutUtils::SameLineOrWrap(110.0f, false);
     ImGui::SetNextItemWidth(110);
     const char* sortLabels[] = {"Name", "Type", "Date"};
     ImGui::Combo("##ProjectSort", &sortMode, sortLabels, IM_ARRAYSIZE(sortLabels));
-    ImGui::SameLine();
+    ImGuiLayoutUtils::SameLineOrWrap(buttonWidth("Desc##sort"), false);
     if (ImGui::SmallButton(sortAscending ? "Asc##sort" : "Desc##sort")) {
         sortAscending = !sortAscending;
     }

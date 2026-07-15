@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <memory>
 #include "Scene/Component.h"
 #include "Scene/LightUniformData.h"
@@ -120,15 +121,27 @@ struct AABB : public BoundingVolume {
 // 📌 STRUCT TRANSFORM
 struct Transform {
     glm::vec3 position{0.f, 0.f, 0.f};
-    glm::vec3 rotation{0.f, 0.f, 0.f};
+    glm::vec3 rotation{0.f, 0.f, 0.f}; // Euler degrees; ignored by getModelMatrix() when useQuatRotation is set.
     glm::vec3 scale{1.f, 1.f, 1.f};
+
+    // Used exclusively by animated nodes (AnimationComponent) to avoid the
+    // quaternion->Euler->matrix roundtrip every frame, which is discontinuous
+    // near gimbal singularities and produces visible jitter on rotating joints.
+    // Everything else in the engine (gizmos, Inspector, serialization) keeps
+    // using `rotation` in degrees and never touches this field.
+    glm::quat rotationQuat{1.0f, 0.0f, 0.0f, 0.0f};
+    bool useQuatRotation = false;
 
     glm::mat4 getModelMatrix() const {
         glm::mat4 model = glm::mat4(1.0f);
         model = glm::translate(model, position);
-        model = glm::rotate(model, glm::radians(rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
-        model = glm::rotate(model, glm::radians(rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
-        model = glm::rotate(model, glm::radians(rotation.z), glm::vec3(0.0f, 0.0f, 1.0f));
+        if (useQuatRotation) {
+            model *= glm::mat4_cast(rotationQuat);
+        } else {
+            model = glm::rotate(model, glm::radians(rotation.x), glm::vec3(1.0f, 0.0f, 0.0f));
+            model = glm::rotate(model, glm::radians(rotation.y), glm::vec3(0.0f, 1.0f, 0.0f));
+            model = glm::rotate(model, glm::radians(rotation.z), glm::vec3(0.0f, 0.0f, 1.0f));
+        }
         model = glm::scale(model, scale);
         return model;
     }

@@ -134,3 +134,9 @@ void OpenGLShader::SetVec4(const std::string& name, const glm::vec4& value) cons
 void OpenGLShader::SetMat4(const std::string& name, const glm::mat4& value) const {
     glUniformMatrix4fv(glGetUniformLocation(ID, name.c_str()), 1, GL_FALSE, glm::value_ptr(value));
 }
+
+void OpenGLShader::SetMat4Array(const std::string& name, const std::vector<glm::mat4>& values) const {
+    if (values.empty()) return;
+    glUniformMatrix4fv(glGetUniformLocation(ID, name.c_str()), static_cast<GLsizei>(values.size()),
+                        GL_FALSE, glm::value_ptr(values[0]));
+}
