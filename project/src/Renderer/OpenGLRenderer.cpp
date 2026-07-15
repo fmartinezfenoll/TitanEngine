@@ -13,6 +13,7 @@
 #include "Scene/MeshComponent.h"
 #include "Renderer/GizmoRenderer.h"
 #include "Renderer/Skybox.h"
+#include "Renderer/BillboardGeometry.h"
 #include "Debug/DebugUI.h"
 #include "Debug/ProjectBrowser.h"
 #include "Core/Stats.h"
@@ -136,6 +137,7 @@ bool OpenGLRenderer::Init(int width, int height, const std::string& appName)
 
     GizmoRenderer::Init();
     Skybox::InitSharedGeometry();
+    BillboardGeometry::Init();
 
     std::cout << "OpenGL Version: " << glGetString(GL_VERSION) << std::endl;
     std::cout << "Renderer: " << glGetString(GL_RENDERER) << std::endl;
@@ -148,6 +150,7 @@ void OpenGLRenderer::Shutdown()
 {
     if (brdfLUTID != 0) glDeleteTextures(1, &brdfLUTID);
     Skybox::ShutdownSharedGeometry();
+    BillboardGeometry::Shutdown();
     GizmoRenderer::Shutdown();
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
@@ -513,7 +516,8 @@ void OpenGLRenderer::Render()
 
         TNode* root = activeScene->GetRoot();
         if (root) {
-            activeScene->Draw(frustum, view, projection, cameraWorldPos, lights, shadowRenderData, iblRenderData);
+            activeScene->Draw(frustum, view, projection, cameraWorldPos, lights, shadowRenderData, iblRenderData,
+                              static_cast<float>(glfwGetTime()));
         }
 
         if (wireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);

@@ -11,6 +11,10 @@
 #include "Scene/CameraPathComponent.h"
 #include "Scene/SkinComponent.h"
 #include "Scene/PatrolComponent.h"
+#include "Scene/BillboardComponent.h"
+#include "Scene/GrassComponent.h"
+#include "Scene/ParticleSystemComponent.h"
+#include "ResourceManager/Texture.h"
 #include "ResourceManager/ResourceManager.h"
 #include "ResourceManager/Material.h"
 #include "ResourceManager/OpenGLShader.h"
@@ -368,6 +372,54 @@ json SerializeComponents(const TNode* node) {
         arr.push_back(j);
     }
 
+    if (auto* billboard = node->GetComponent<BillboardComponent>()) {
+        json j;
+        j["type"] = "billboard";
+        j["texture"] = billboard->texturePath;
+        j["size"] = {billboard->size.x, billboard->size.y};
+        j["tint"] = {billboard->tint.r, billboard->tint.g, billboard->tint.b, billboard->tint.a};
+        j["alphaCutoff"] = billboard->alphaCutoff;
+        arr.push_back(j);
+    }
+
+    if (auto* grass = node->GetComponent<GrassComponent>()) {
+        json j;
+        j["type"] = "grass";
+        j["texture"] = grass->texturePath;
+        j["areaSize"] = {grass->areaSize.x, grass->areaSize.y};
+        j["density"] = grass->density;
+        j["bladeSize"] = {grass->bladeSize.x, grass->bladeSize.y};
+        j["tint"] = {grass->tint.r, grass->tint.g, grass->tint.b};
+        j["alphaCutoff"] = grass->alphaCutoff;
+        j["windStrength"] = grass->windStrength;
+        j["windSpeed"] = grass->windSpeed;
+        j["seed"] = grass->seed;
+        arr.push_back(j);
+    }
+
+    if (auto* ps = node->GetComponent<ParticleSystemComponent>()) {
+        json j;
+        j["type"] = "particles";
+        j["texture"] = ps->texturePath;
+        j["preset"] = static_cast<int>(ps->preset);
+        j["blendMode"] = static_cast<int>(ps->blendMode);
+        j["maxParticles"] = ps->maxParticles;
+        j["emitRate"] = ps->emitRate;
+        j["lifetime"] = ps->lifetime;
+        j["lifetimeSpread"] = ps->lifetimeSpread;
+        j["startVelocity"] = {ps->startVelocity.x, ps->startVelocity.y, ps->startVelocity.z};
+        j["velocitySpread"] = {ps->velocitySpread.x, ps->velocitySpread.y, ps->velocitySpread.z};
+        j["gravity"] = {ps->gravity.x, ps->gravity.y, ps->gravity.z};
+        j["emitRadius"] = ps->emitRadius;
+        j["startColor"] = {ps->startColor.r, ps->startColor.g, ps->startColor.b, ps->startColor.a};
+        j["endColor"] = {ps->endColor.r, ps->endColor.g, ps->endColor.b, ps->endColor.a};
+        j["startSize"] = ps->startSize;
+        j["endSize"] = ps->endSize;
+        j["worldSpace"] = ps->worldSpace;
+        j["playing"] = ps->playing;
+        arr.push_back(j);
+    }
+
     return arr;
 }
 
@@ -622,6 +674,94 @@ void DeserializeComponents(TNode* node, Scene* scene, const json& j) {
                     cameraPath->AddPoint(pos, lookAt, travelSeconds, holdSeconds);
                 }
             }
+
+            if (scene) {
+                scene->RegisterAnimator(node);
+            }
+        }
+        else if (type == "billboard") {
+            auto* billboard = node->AddComponent<BillboardComponent>();
+            std::string texPath = compJson.value("texture", "");
+            if (!texPath.empty()) {
+                std::string texName = texPath;
+                std::replace(texName.begin(), texName.end(), '/', '_');
+                std::replace(texName.begin(), texName.end(), '\\', '_');
+                billboard->texture = ResourceManager::LoadTexture(texName, texPath);
+                billboard->texturePath = texPath;
+            }
+            if (compJson.contains("size") && compJson["size"].is_array()) {
+                auto s = compJson["size"]; billboard->size = glm::vec2(s[0], s[1]);
+            }
+            if (compJson.contains("tint") && compJson["tint"].is_array()) {
+                auto t = compJson["tint"]; billboard->tint = glm::vec4(t[0], t[1], t[2], t[3]);
+            }
+            billboard->alphaCutoff = compJson.value("alphaCutoff", 0.01f);
+        }
+        else if (type == "grass") {
+            auto* grass = node->AddComponent<GrassComponent>();
+            std::string texPath = compJson.value("texture", "");
+            if (!texPath.empty()) {
+                std::string texName = texPath;
+                std::replace(texName.begin(), texName.end(), '/', '_');
+                std::replace(texName.begin(), texName.end(), '\\', '_');
+                grass->texture = ResourceManager::LoadTexture(texName, texPath);
+                grass->texturePath = texPath;
+            }
+            if (compJson.contains("areaSize") && compJson["areaSize"].is_array()) {
+                auto a = compJson["areaSize"]; grass->areaSize = glm::vec2(a[0], a[1]);
+            }
+            grass->density = compJson.value("density", 500);
+            if (compJson.contains("bladeSize") && compJson["bladeSize"].is_array()) {
+                auto b = compJson["bladeSize"]; grass->bladeSize = glm::vec2(b[0], b[1]);
+            }
+            if (compJson.contains("tint") && compJson["tint"].is_array()) {
+                auto t = compJson["tint"]; grass->tint = glm::vec3(t[0], t[1], t[2]);
+            }
+            grass->alphaCutoff = compJson.value("alphaCutoff", 0.3f);
+            grass->windStrength = compJson.value("windStrength", 0.08f);
+            grass->windSpeed = compJson.value("windSpeed", 1.5f);
+            grass->seed = compJson.value("seed", 1337u);
+            grass->Rebuild();
+        }
+        else if (type == "particles") {
+            auto* ps = node->AddComponent<ParticleSystemComponent>();
+            std::string texPath = compJson.value("texture", "");
+            if (!texPath.empty()) {
+                std::string texName = texPath;
+                std::replace(texName.begin(), texName.end(), '/', '_');
+                std::replace(texName.begin(), texName.end(), '\\', '_');
+                ps->texture = ResourceManager::LoadTexture(texName, texPath);
+                ps->texturePath = texPath;
+            }
+            // preset stored for the Inspector's combo, but the concrete params
+            // below are restored directly (they may have been edited away from
+            // the preset defaults), so DON'T call ApplyPreset here.
+            ps->preset = static_cast<ParticleSystemComponent::Preset>(compJson.value("preset", 0));
+            ps->blendMode = static_cast<ParticleSystemComponent::BlendMode>(compJson.value("blendMode", 1));
+            ps->maxParticles = compJson.value("maxParticles", 500);
+            ps->emitRate = compJson.value("emitRate", 60.0f);
+            ps->lifetime = compJson.value("lifetime", 2.0f);
+            ps->lifetimeSpread = compJson.value("lifetimeSpread", 0.4f);
+            if (compJson.contains("startVelocity") && compJson["startVelocity"].is_array()) {
+                auto v = compJson["startVelocity"]; ps->startVelocity = glm::vec3(v[0], v[1], v[2]);
+            }
+            if (compJson.contains("velocitySpread") && compJson["velocitySpread"].is_array()) {
+                auto v = compJson["velocitySpread"]; ps->velocitySpread = glm::vec3(v[0], v[1], v[2]);
+            }
+            if (compJson.contains("gravity") && compJson["gravity"].is_array()) {
+                auto g = compJson["gravity"]; ps->gravity = glm::vec3(g[0], g[1], g[2]);
+            }
+            ps->emitRadius = compJson.value("emitRadius", 0.1f);
+            if (compJson.contains("startColor") && compJson["startColor"].is_array()) {
+                auto c = compJson["startColor"]; ps->startColor = glm::vec4(c[0], c[1], c[2], c[3]);
+            }
+            if (compJson.contains("endColor") && compJson["endColor"].is_array()) {
+                auto c = compJson["endColor"]; ps->endColor = glm::vec4(c[0], c[1], c[2], c[3]);
+            }
+            ps->startSize = compJson.value("startSize", 0.5f);
+            ps->endSize = compJson.value("endSize", 0.1f);
+            ps->worldSpace = compJson.value("worldSpace", true);
+            ps->playing = compJson.value("playing", true);
 
             if (scene) {
                 scene->RegisterAnimator(node);

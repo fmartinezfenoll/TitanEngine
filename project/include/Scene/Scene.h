@@ -21,7 +21,8 @@ public:
     void Update(float deltaTime);
     void Draw(const Frustum& frustum, const glm::mat4& view, const glm::mat4& projection,
               const glm::vec3& cameraWorldPos, const std::vector<LightUniformData>& lightUniforms,
-              const ShadowRenderData& shadowData, const IBLRenderData& iblData);
+              const ShadowRenderData& shadowData, const IBLRenderData& iblData,
+              float time = 0.0f);
 
     void Clear();
 

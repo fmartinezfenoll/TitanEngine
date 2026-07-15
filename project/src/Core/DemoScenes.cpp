@@ -1,7 +1,8 @@
 // Builds the built-in demo/test scenes (Triangle, Square, GLTF, Duck,
-// Animation Test) the first time the engine runs with no scenes/ directory --
-// exercises engine features (glTF loading, skinning, patrol, state machines,
-// camera paths, skybox/lighting) without needing hand-authored .scene files.
+// Animation Test, VFX Test) the first time the engine runs with no scenes/
+// directory -- exercises engine features (glTF loading, skinning, patrol,
+// state machines, camera paths, skybox/lighting, grass/billboards/particles)
+// without needing hand-authored .scene files.
 // Kept separate from Application.cpp so that file stays focused on the
 // actual application lifecycle (Init/Run/Update/Shutdown).
 #include "Core/Application.h"
@@ -20,6 +21,9 @@
 #include "Scene/AnimationStateMachine.h"
 #include "Scene/PatrolComponent.h"
 #include "Scene/CameraPathComponent.h"
+#include "Scene/BillboardComponent.h"
+#include "Scene/GrassComponent.h"
+#include "Scene/ParticleSystemComponent.h"
 #include "Renderer/Skybox.h"
 #include "Core/EngineSettings.h"
 #include "Core/Log.h"
@@ -235,6 +239,73 @@ void Application::SetupScenes()
         animScene->AddNodeToRoot(cameraNode);
         animScene->RegisterAnimator(cameraNode);
         animScene->SetMainCamera(cameraNode);
+    }
+
+    if (!sm.GetScene("VFX Test")) {
+        Scene* vfxScene = sm.CreateScene("VFX Test");
+
+        vfxScene->AddNodeToRoot(BuildGroundPlaneNode(40.0f));
+
+        // Grass patch covering most of the ground.
+        TNode* grassNode = new TNode(nullptr, "Grass");
+        auto* grass = grassNode->AddComponent<GrassComponent>();
+        grass->areaSize = glm::vec2(30.0f, 30.0f);
+        grass->density = 4000;
+        grass->bladeSize = glm::vec2(0.25f, 0.8f);
+        grass->windStrength = 0.12f;
+        grass->Rebuild();
+        vfxScene->AddNodeToRoot(grassNode);
+
+        // Campfire: fire + smoke rising from the same spot.
+        TNode* fireNode = new TNode(nullptr, "Campfire Fire");
+        fireNode->transform.position = glm::vec3(0.0f, 0.3f, 0.0f);
+        auto* fire = fireNode->AddComponent<ParticleSystemComponent>();
+        fire->ApplyPreset(ParticleSystemComponent::Preset::Fire);
+        vfxScene->AddNodeToRoot(fireNode);
+        vfxScene->RegisterAnimator(fireNode);
+
+        TNode* smokeNode = new TNode(nullptr, "Campfire Smoke");
+        smokeNode->transform.position = glm::vec3(0.0f, 1.2f, 0.0f);
+        auto* smoke = smokeNode->AddComponent<ParticleSystemComponent>();
+        smoke->ApplyPreset(ParticleSystemComponent::Preset::Smoke);
+        vfxScene->AddNodeToRoot(smokeNode);
+        vfxScene->RegisterAnimator(smokeNode);
+
+        // A sparks fountain off to the side.
+        TNode* sparksNode = new TNode(nullptr, "Sparks");
+        sparksNode->transform.position = glm::vec3(6.0f, 0.5f, 3.0f);
+        auto* sparks = sparksNode->AddComponent<ParticleSystemComponent>();
+        sparks->ApplyPreset(ParticleSystemComponent::Preset::Sparks);
+        vfxScene->AddNodeToRoot(sparksNode);
+        vfxScene->RegisterAnimator(sparksNode);
+
+        // A lone billboard (untextured tinted quad; drop a texture in the
+        // Inspector to make it a sprite/impostor).
+        TNode* billboardNode = new TNode(nullptr, "Billboard");
+        billboardNode->transform.position = glm::vec3(-6.0f, 2.0f, 2.0f);
+        auto* billboard = billboardNode->AddComponent<BillboardComponent>();
+        billboard->size = glm::vec2(2.0f, 3.0f);
+        billboard->tint = glm::vec4(0.4f, 0.8f, 1.0f, 0.9f);
+        vfxScene->AddNodeToRoot(billboardNode);
+
+        // Skybox + a sun so the grass reads well.
+        auto skyboxCubemap = ResourceManager::LoadSkyboxFromFolder("space");
+        if (skyboxCubemap) {
+            vfxScene->SetSkybox(std::make_shared<Skybox>(skyboxCubemap, "space"));
+        }
+
+        TNode* sunNode = new TNode(nullptr, "Sun");
+        auto* sun = sunNode->AddComponent<LightComponent>(sunNode, LightType::Directional);
+        sun->intensity = 3.0f;
+        sunNode->transform.rotation = glm::vec3(-50.0f, -30.0f, 0.0f);
+        vfxScene->AddNodeToRoot(sunNode);
+
+        TNode* vfxCamera = new TNode(nullptr, "MainCamera");
+        CameraComponent* cam = vfxCamera->AddComponent<CameraComponent>(vfxCamera);
+        vfxCamera->transform.position = glm::vec3(0.0f, 5.0f, 14.0f);
+        cam->pitch = -18.0f;
+        vfxScene->AddNodeToRoot(vfxCamera);
+        vfxScene->SetMainCamera(vfxCamera);
     }
 
     const std::string& lastActiveScene = EngineSettings::GetLastActiveScene();

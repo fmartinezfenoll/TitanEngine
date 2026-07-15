@@ -11,6 +11,9 @@
 #include "Scene/AnimationComponent.h"
 #include "Scene/AnimationStateMachine.h"
 #include "Scene/CameraPathComponent.h"
+#include "Scene/BillboardComponent.h"
+#include "Scene/GrassComponent.h"
+#include "Scene/ParticleSystemComponent.h"
 #include "Scene/PatrolComponent.h"
 #include "ResourceManager/Material.h"
 #include "ResourceManager/MaterialSerializer.h"
@@ -1921,6 +1924,131 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                 }
             }
 
+            // Shared texture drop-target for the VFX components below: drag a
+            // texture asset from the Project browser onto the button to assign.
+            auto vfxTextureSlot = [&](const char* label, std::shared_ptr<Texture>& slot, std::string& pathOut) {
+                std::string buttonLabel = std::string(label) + ": " + (slot ? "Yes" : "None");
+                ImGui::Button(buttonLabel.c_str(), ImVec2(200, 0));
+                if (ImGui::BeginDragDropTarget()) {
+                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(ProjectBrowser::kTexturePayloadType)) {
+                        std::string filePath(static_cast<const char*>(payload->Data));
+                        std::string texName = filePath;
+                        std::replace(texName.begin(), texName.end(), '/', '_');
+                        std::replace(texName.begin(), texName.end(), '\\', '_');
+                        slot = ResourceManager::LoadTexture(texName, filePath);
+                        pathOut = filePath;
+                    }
+                    ImGui::EndDragDropTarget();
+                }
+                if (slot) {
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton((std::string("Clear##") + label).c_str())) {
+                        slot = nullptr;
+                        pathOut.clear();
+                    }
+                }
+            };
+
+            if (auto* billboard = selectedNode->GetComponent<BillboardComponent>()) {
+                ImGui::Spacing();
+                ImGui::Text("Billboard:");
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Remove##billboard")) {
+                    selectedNode->RemoveComponent<BillboardComponent>();
+                } else {
+                    ImGui::Indent();
+                    vfxTextureSlot("Texture##billboard", billboard->texture, billboard->texturePath);
+                    ImGui::DragFloat2("Size##billboard", &billboard->size.x, 0.05f, 0.01f, 100.0f);
+                    ImGui::ColorEdit4("Tint##billboard", &billboard->tint.x);
+                    ImGui::DragFloat("Alpha Cutoff##billboard", &billboard->alphaCutoff, 0.01f, 0.0f, 1.0f);
+                    ImGui::Unindent();
+                }
+            }
+
+            if (auto* grass = selectedNode->GetComponent<GrassComponent>()) {
+                ImGui::Spacing();
+                ImGui::Text("Grass:");
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Remove##grass")) {
+                    selectedNode->RemoveComponent<GrassComponent>();
+                } else {
+                    ImGui::Indent();
+                    vfxTextureSlot("Texture##grass", grass->texture, grass->texturePath);
+
+                    bool needsRebuild = false;
+                    needsRebuild |= ImGui::DragFloat2("Area Size##grass", &grass->areaSize.x, 0.5f, 1.0f, 500.0f);
+                    needsRebuild |= ImGui::DragInt("Density##grass", &grass->density, 5.0f, 0, 20000);
+                    int seedInt = static_cast<int>(grass->seed);
+                    if (ImGui::DragInt("Seed##grass", &seedInt, 1.0f, 0, 1000000)) {
+                        grass->seed = static_cast<unsigned int>(std::max(0, seedInt));
+                        needsRebuild = true;
+                    }
+                    ImGui::DragFloat2("Blade Size##grass", &grass->bladeSize.x, 0.01f, 0.01f, 10.0f);
+                    ImGui::ColorEdit3("Tint##grass", &grass->tint.x);
+                    ImGui::DragFloat("Alpha Cutoff##grass", &grass->alphaCutoff, 0.01f, 0.0f, 1.0f);
+                    ImGui::DragFloat("Wind Strength##grass", &grass->windStrength, 0.01f, 0.0f, 2.0f);
+                    ImGui::DragFloat("Wind Speed##grass", &grass->windSpeed, 0.05f, 0.0f, 20.0f);
+
+                    if (needsRebuild) grass->Rebuild();
+                    if (ImGui::Button("Rebuild##grass")) grass->Rebuild();
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("(%d blades)", grass->density);
+                    ImGui::Unindent();
+                }
+            }
+
+            if (auto* particles = selectedNode->GetComponent<ParticleSystemComponent>()) {
+                ImGui::Spacing();
+                ImGui::Text("Particle System:");
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Remove##particles")) {
+                    if (activeScene) {
+                        bool stillAnimated = selectedNode->GetComponent<AnimationComponent>() != nullptr
+                            || selectedNode->GetComponent<PatrolComponent>() != nullptr
+                            || selectedNode->GetComponent<CameraPathComponent>() != nullptr;
+                        if (!stillAnimated) activeScene->UnregisterAnimator(selectedNode);
+                    }
+                    selectedNode->RemoveComponent<ParticleSystemComponent>();
+                } else {
+                    ImGui::Indent();
+
+                    const char* presetLabels[] = { "Custom", "Fire", "Smoke", "Sparks" };
+                    int presetIdx = static_cast<int>(particles->preset);
+                    ImGui::SetNextItemWidth(140);
+                    if (ImGui::Combo("Preset##particles", &presetIdx, presetLabels, IM_ARRAYSIZE(presetLabels))) {
+                        particles->ApplyPreset(static_cast<ParticleSystemComponent::Preset>(presetIdx));
+                    }
+
+                    const char* blendLabels[] = { "Alpha", "Additive" };
+                    int blendIdx = static_cast<int>(particles->blendMode);
+                    ImGui::SetNextItemWidth(140);
+                    if (ImGui::Combo("Blend##particles", &blendIdx, blendLabels, IM_ARRAYSIZE(blendLabels))) {
+                        particles->blendMode = static_cast<ParticleSystemComponent::BlendMode>(blendIdx);
+                    }
+
+                    ImGui::Checkbox("Playing##particles", &particles->playing);
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("(%d live)", particles->GetLiveCount());
+
+                    vfxTextureSlot("Texture##particles", particles->texture, particles->texturePath);
+
+                    ImGui::DragInt("Max##particles", &particles->maxParticles, 5.0f, 1, 100000);
+                    ImGui::DragFloat("Emit Rate##particles", &particles->emitRate, 1.0f, 0.0f, 5000.0f);
+                    ImGui::DragFloat("Lifetime##particles", &particles->lifetime, 0.05f, 0.05f, 60.0f);
+                    ImGui::DragFloat("Lifetime Spread##particles", &particles->lifetimeSpread, 0.02f, 0.0f, 10.0f);
+                    ImGui::DragFloat3("Start Velocity##particles", &particles->startVelocity.x, 0.05f);
+                    ImGui::DragFloat3("Velocity Spread##particles", &particles->velocitySpread.x, 0.05f, 0.0f, 20.0f);
+                    ImGui::DragFloat3("Gravity##particles", &particles->gravity.x, 0.05f);
+                    ImGui::DragFloat("Emit Radius##particles", &particles->emitRadius, 0.01f, 0.0f, 20.0f);
+                    ImGui::ColorEdit4("Start Color##particles", &particles->startColor.x);
+                    ImGui::ColorEdit4("End Color##particles", &particles->endColor.x);
+                    ImGui::DragFloat("Start Size##particles", &particles->startSize, 0.01f, 0.0f, 20.0f);
+                    ImGui::DragFloat("End Size##particles", &particles->endSize, 0.01f, 0.0f, 20.0f);
+
+                    ImGui::Unindent();
+                }
+            }
+
             ImGui::Unindent();
         }
 
@@ -2041,7 +2169,7 @@ void DebugUI::DeleteNode(TNode* node, Scene* activeScene) {
                 activeScene->UnregisterLight(current);
             }
             if (current->GetComponent<AnimationComponent>() || current->GetComponent<PatrolComponent>()
-                || current->GetComponent<CameraPathComponent>()) {
+                || current->GetComponent<CameraPathComponent>() || current->GetComponent<ParticleSystemComponent>()) {
                 activeScene->UnregisterAnimator(current);
             }
             for (TNode* child : current->children) {
@@ -2124,6 +2252,20 @@ void DebugUI::DrawAddComponentMenu(TNode* node, Scene* activeScene) {
 
         if (!node->GetComponent<CameraPathComponent>() && ImGui::MenuItem("Camera Path")) {
             node->AddComponent<CameraPathComponent>(node);
+            if (activeScene) activeScene->RegisterAnimator(node);
+        }
+
+        if (!node->GetComponent<BillboardComponent>() && ImGui::MenuItem("Billboard")) {
+            node->AddComponent<BillboardComponent>();
+        }
+
+        if (!node->GetComponent<GrassComponent>() && ImGui::MenuItem("Grass")) {
+            node->AddComponent<GrassComponent>();
+        }
+
+        if (!node->GetComponent<ParticleSystemComponent>() && ImGui::MenuItem("Particle System")) {
+            auto* ps = node->AddComponent<ParticleSystemComponent>();
+            ps->ApplyPreset(ParticleSystemComponent::Preset::Fire);
             if (activeScene) activeScene->RegisterAnimator(node);
         }
 
