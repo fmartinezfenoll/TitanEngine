@@ -510,7 +510,26 @@ std::vector<TNode*> GLTFLoader::LoadModel(const std::string& path)
         ProcessSkins(model, nodeIndexMap, meshNodeToGltfNode);
 
     if (!model.animations.empty() && !nodes.empty())
-        ProcessAnimations(model, nodes.front(), nodeIndexMap);
+    {
+        // ProcessAnimations builds a pre-order index from a single root and
+        // hangs the AnimationComponent off it; every animated node must be
+        // reachable from that root (also required for the save/load round-trip,
+        // which walks pre-order from the AnimationComponent's node). If the
+        // glTF scene has multiple root nodes, wrap them all under one synthetic
+        // container so no animated node lives in a sibling subtree the index
+        // would miss.
+        TNode* animRoot = nodes.front();
+        if (nodes.size() > 1)
+        {
+            TNode* container = new TNode(nullptr, "GLTFRoot");
+            for (TNode* n : nodes)
+                container->addChild(n);
+            nodes.clear();
+            nodes.push_back(container);
+            animRoot = container;
+        }
+        ProcessAnimations(model, animRoot, nodeIndexMap);
+    }
 
     return nodes;
 }

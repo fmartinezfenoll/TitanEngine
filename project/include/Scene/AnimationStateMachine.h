@@ -40,6 +40,10 @@ public:
                         float blendSeconds = 0.2f);
     void RemoveState(const std::string& name);
     void RemoveTransition(size_t index);
+    // Renames a state and rewrites every reference to the old name -- each
+    // transition's fromState/toState, and initialState -- so no reference is
+    // left orphaned. Use this instead of writing State::name directly.
+    void RenameState(const std::string& oldName, const std::string& newName);
 
     void SetBool(const std::string& parameter, bool value);
     void SetFloat(const std::string& parameter, float value);
@@ -47,10 +51,9 @@ public:
     void SetInitialState(const std::string& name);
     const std::string& GetInitialState() const { return initialState; }
 
-    // Inspector editing access -- direct mutation of names/clips/conditions.
-    // Renaming a state here does NOT rewrite existing Transition::fromState/
-    // toState/initialState references to it; the Inspector editor is
-    // responsible for that (see DebugUI's state-machine section).
+    // Inspector editing access -- direct mutation of clips/conditions. To
+    // rename a state, use RenameState() (not State::name directly) so
+    // transitions and initialState referencing it stay consistent.
     std::vector<State>& GetStatesMutable() { return states; }
     std::vector<Transition>& GetTransitionsMutable() { return transitions; }
     const std::vector<State>& GetStates() const { return states; }

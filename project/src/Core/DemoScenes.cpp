@@ -157,7 +157,7 @@ void Application::SetupScenes()
                     // states reuse the same walk clip -- enough to exercise the
                     // mechanics (transition + 0.25s blend + event firing) even though
                     // it isn't a real idle pose. Scene::Update feeds "isMoving" from
-                    // this node's PARENT PatrolComponent each frame (see Scene.cpp).
+                    // the nearest ancestor PatrolComponent each frame (see Scene.cpp).
                     auto stateMachine = std::make_unique<AnimationStateMachine>();
                     stateMachine->AddState("Idle", clipName, /*loop=*/true);
                     stateMachine->AddState("Walk", clipName, /*loop=*/true);

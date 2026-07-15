@@ -384,6 +384,17 @@ struct PendingSkin {
 };
 thread_local std::vector<PendingSkin> g_pendingSkins;
 
+// Clears the pending lists on scope exit, whether the deserialize path returns
+// normally OR throws partway through. Without this, an exception mid-load left
+// stale TNode* (into the abandoned tree) in the thread_local pending lists,
+// which the NEXT load's ResolvePendingAnimationData would then dereference.
+struct PendingAnimationScopeGuard {
+    ~PendingAnimationScopeGuard() {
+        g_pendingAnimationRoots.clear();
+        g_pendingSkins.clear();
+    }
+};
+
 void DeserializeComponents(TNode* node, Scene* scene, const json& j) {
     if (!j.is_array()) return;
 
@@ -661,9 +672,9 @@ void ResolvePendingAnimationData() {
             pending.meshNode = nullptr;
         }
     }
-
-    g_pendingAnimationRoots.clear();
-    g_pendingSkins.clear();
+    // The pending lists are cleared by PendingAnimationScopeGuard at the end of
+    // the enclosing load, not here -- so a load that throws before reaching this
+    // function still gets its stale pointers cleared.
 }
 
 json SerializeNode(const TNode* node) {
@@ -797,6 +808,7 @@ bool SceneSerializer::SaveScene(Scene* scene, const std::string& filePath) {
 }
 
 Scene* SceneSerializer::LoadScene(const std::string& filePath) {
+    PendingAnimationScopeGuard pendingGuard;
     try {
         std::ifstream file(filePath);
         if (!file.is_open()) {
@@ -847,6 +859,7 @@ Scene* SceneSerializer::LoadScene(const std::string& filePath) {
 TNode* SceneSerializer::DuplicateNode(const TNode* node, Scene* scene) {
     if (!node) return nullptr;
 
+    PendingAnimationScopeGuard pendingGuard;
     try {
         json j = SerializeNode(node);
         TNode* result = DeserializeNode(j, scene);
@@ -864,6 +877,7 @@ std::string SceneSerializer::SerializeNodeToString(const TNode* node) {
 }
 
 TNode* SceneSerializer::DeserializeNodeFromString(const std::string& jsonStr, Scene* scene) {
+    PendingAnimationScopeGuard pendingGuard;
     try {
         json j = json::parse(jsonStr);
         TNode* result = DeserializeNode(j, scene);

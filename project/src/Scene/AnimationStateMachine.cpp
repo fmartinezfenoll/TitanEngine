@@ -24,6 +24,19 @@ void AnimationStateMachine::RemoveTransition(size_t index) {
     transitions.erase(transitions.begin() + static_cast<long>(index));
 }
 
+void AnimationStateMachine::RenameState(const std::string& oldName, const std::string& newName) {
+    if (oldName == newName || newName.empty()) return;
+    if (FindState(newName)) return; // refuse to merge two states into one name
+    for (auto& state : states) {
+        if (state.name == oldName) state.name = newName;
+    }
+    for (auto& transition : transitions) {
+        if (transition.fromState == oldName) transition.fromState = newName;
+        if (transition.toState == oldName) transition.toState = newName;
+    }
+    if (initialState == oldName) initialState = newName;
+}
+
 void AnimationStateMachine::SetBool(const std::string& parameter, bool value) {
     parameters[parameter] = value ? 1.0f : 0.0f;
 }

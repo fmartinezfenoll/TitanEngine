@@ -145,8 +145,17 @@ void MeshComponent::Draw(const glm::mat4& modelMatrix, MaterialComponent* materi
     shader->SetMat4("model", modelMatrix);
     shader->SetVec3("cameraWorldPos", cameraWorldPos);
 
-    if (SkinnedMesh && skin) {
-        shader->SetMat4Array("jointMatrices", skin->ComputeJointMatrices(glm::inverse(modelMatrix)));
+    if (SkinnedMesh) {
+        // Always upload joint matrices for a skinned mesh, even when there's no
+        // skin or the skin resolved to nothing -- otherwise jointMatrices keeps
+        // whatever a previously-drawn skinned mesh sharing this program left in
+        // it, deforming this mesh with someone else's pose. A single identity is
+        // enough: the vertex shader falls back to identity for zero-weight verts
+        // and indexes jointMatrices[0] for the rest.
+        std::vector<glm::mat4> jointMatrices;
+        if (skin) jointMatrices = skin->ComputeJointMatrices(glm::inverse(modelMatrix));
+        if (jointMatrices.empty()) jointMatrices.push_back(glm::mat4(1.0f));
+        shader->SetMat4Array("jointMatrices", jointMatrices);
     }
 
     int lightCount = std::min(static_cast<int>(lights.size()), kMaxLights);
@@ -174,8 +183,18 @@ void MeshComponent::Draw(const glm::mat4& modelMatrix, MaterialComponent* materi
     // to the same unit is a type mismatch that makes the whole draw call
     // fail with GL_INVALID_OPERATION (no GL error message, no visible
     // geometry) as soon as anything else populates that unit for real.
+    //
+    // Inactive samplers point at dedicated high units (>=11) that the renderer
+    // never binds anything to -- NOT at the shadow range (3-7), which the
+    // renderer fills DYNAMICALLY in light order (a point light's cubemap can
+    // land on unit 3), so reusing those as dummies could re-create the exact
+    // type collision. An unbound unit is valid for any sampler type.
+    constexpr int kDummyDirShadowUnit = 11;   // sampler2D
+    constexpr int kDummySpotShadowUnit = 12;  // sampler2D (12, 13)
+    constexpr int kDummyPointShadowUnit = 14; // samplerCube (14, 15)
+
     shader->SetBool("hasDirectionalShadow", shadowData.hasDirectional);
-    shader->SetInt("directionalShadowMap", static_cast<int>(shadowData.hasDirectional ? shadowData.directionalSlot : 3));
+    shader->SetInt("directionalShadowMap", shadowData.hasDirectional ? static_cast<int>(shadowData.directionalSlot) : kDummyDirShadowUnit);
     if (shadowData.hasDirectional) {
         shader->SetMat4("directionalLightSpaceMatrix", shadowData.directionalLightSpaceMatrix);
     }
@@ -183,8 +202,8 @@ void MeshComponent::Draw(const glm::mat4& modelMatrix, MaterialComponent* materi
     shader->SetInt("spotShadowCount", shadowData.spotCount);
     for (int i = 0; i < 2; ++i) {
         std::string idx = "[" + std::to_string(i) + "]";
-        unsigned int unit = (i < shadowData.spotCount) ? shadowData.spotSlots[i] : static_cast<unsigned int>(4 + i);
-        shader->SetInt("spotShadowMaps" + idx, static_cast<int>(unit));
+        int unit = (i < shadowData.spotCount) ? static_cast<int>(shadowData.spotSlots[i]) : kDummySpotShadowUnit + i;
+        shader->SetInt("spotShadowMaps" + idx, unit);
         if (i < shadowData.spotCount) {
             shader->SetMat4("spotLightSpaceMatrices" + idx, shadowData.spotLightSpaceMatrices[i]);
         }
@@ -193,8 +212,8 @@ void MeshComponent::Draw(const glm::mat4& modelMatrix, MaterialComponent* materi
     shader->SetInt("pointShadowCount", shadowData.pointCount);
     for (int i = 0; i < 2; ++i) {
         std::string idx = "[" + std::to_string(i) + "]";
-        unsigned int unit = (i < shadowData.pointCount) ? shadowData.pointSlots[i] : static_cast<unsigned int>(6 + i);
-        shader->SetInt("pointShadowMaps" + idx, static_cast<int>(unit));
+        int unit = (i < shadowData.pointCount) ? static_cast<int>(shadowData.pointSlots[i]) : kDummyPointShadowUnit + i;
+        shader->SetInt("pointShadowMaps" + idx, unit);
         if (i < shadowData.pointCount) {
             shader->SetVec3("pointShadowLightPos" + idx, shadowData.pointLightPos[i]);
             shader->SetFloat("pointShadowFarPlane" + idx, shadowData.pointFarPlane[i]);

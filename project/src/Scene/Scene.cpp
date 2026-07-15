@@ -53,15 +53,19 @@ void Scene::RemoveNode(TNode* node) {
 void Scene::Update(float deltaTime) {
     for (TNode* node : animatedNodes) {
         if (auto* anim = node->GetComponent<AnimationComponent>()) {
-            // If this node's animation is state-machine-driven and its parent
-            // is a patrol node (the common "CharacterRoot moves, child mesh
-            // plays a walk cycle" split -- see PatrolComponent's design doc),
-            // feed the state machine an "isMoving" parameter from the patrol's
-            // own paused/moving status before evaluating transitions.
+            // If this node's animation is state-machine-driven and some
+            // ancestor is a patrol node (the common "CharacterRoot moves, a
+            // descendant mesh plays a walk cycle" split -- see PatrolComponent's
+            // design doc), feed the state machine an "isMoving" parameter from
+            // the patrol's own paused/moving status before evaluating
+            // transitions. Walks the whole ancestor chain, not just the direct
+            // parent, so rigs with extra container nodes between the patrol node
+            // and the animated node still couple correctly.
             if (auto* stateMachine = anim->GetStateMachine()) {
-                if (node->parent) {
-                    if (auto* patrol = node->parent->GetComponent<PatrolComponent>()) {
+                for (TNode* ancestor = node->parent; ancestor; ancestor = ancestor->parent) {
+                    if (auto* patrol = ancestor->GetComponent<PatrolComponent>()) {
                         stateMachine->SetBool("isMoving", !patrol->IsPaused());
+                        break;
                     }
                 }
             }

@@ -26,7 +26,21 @@ void CameraPathComponent::AddPoint(const glm::vec3& position, const glm::vec3& l
 void CameraPathComponent::RemovePoint(size_t index) {
     if (index >= points.size()) return;
     points.erase(points.begin() + index);
-    if (currentIndex >= static_cast<int>(points.size())) currentIndex = 0;
+
+    // Editing the path while it plays would leave currentIndex pointing at a
+    // shifted/stale point (and segmentElapsed/holding mid-segment against the
+    // old layout). Rather than try to remap, just restart the traversal from a
+    // clean state -- editing a live path is an authoring action, not something
+    // that needs to preserve exact playback position.
+    if (playing) {
+        currentIndex = 0;
+        segmentElapsed = 0.0f;
+        holding = false;
+        holdElapsed = 0.0f;
+        if (points.empty()) playing = false;
+    } else if (currentIndex >= static_cast<int>(points.size())) {
+        currentIndex = 0;
+    }
 }
 
 void CameraPathComponent::Play() {

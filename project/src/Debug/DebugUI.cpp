@@ -2040,6 +2040,10 @@ void DebugUI::DeleteNode(TNode* node, Scene* activeScene) {
             if (current->GetComponent<LightComponent>()) {
                 activeScene->UnregisterLight(current);
             }
+            if (current->GetComponent<AnimationComponent>() || current->GetComponent<PatrolComponent>()
+                || current->GetComponent<CameraPathComponent>()) {
+                activeScene->UnregisterAnimator(current);
+            }
             for (TNode* child : current->children) {
                 stack.push_back(child);
             }
@@ -2241,8 +2245,14 @@ void DebugUI::DrawStateMachineEditor(AnimationComponent* anim) {
         char nameBuf[128];
         std::snprintf(nameBuf, sizeof(nameBuf), "%s", state.name.c_str());
         ImGui::SetNextItemWidth(140);
-        if (ImGui::InputText("##stateName", nameBuf, sizeof(nameBuf))) {
-            state.name = nameBuf;
+        // Commit the rename on deactivation (not per-keystroke): RenameState
+        // rewrites every transition/initialState reference, so doing it while
+        // the user is mid-typing would churn references against half-typed
+        // names. Note InputText returns false on the deactivation frame, so
+        // check IsItemDeactivatedAfterEdit separately rather than && with it.
+        ImGui::InputText("##stateName", nameBuf, sizeof(nameBuf));
+        if (ImGui::IsItemDeactivatedAfterEdit()) {
+            machine->RenameState(state.name, nameBuf);
         }
 
         ImGui::SameLine();
