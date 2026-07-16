@@ -938,6 +938,71 @@ TNode* DeserializeNode(const json& j, Scene* scene) {
 
 } // namespace
 
+// Serializes a whole scene (grid/clearColor/fog/skybox + node tree) to JSON.
+// Shared by SaveScene (writes to file) and SerializeSceneToString (undo snapshots).
+static json SerializeSceneToJson(Scene* scene) {
+    json j;
+    j["version"] = 1;
+
+    j["showGrid"] = scene->IsGridVisible();
+    const glm::vec3& clearColor = scene->GetClearColor();
+    j["clearColor"] = {clearColor.r, clearColor.g, clearColor.b};
+
+    const FogSettings& fog = scene->GetFog();
+    j["fog"] = {
+        {"enabled", fog.enabled},
+        {"mode", static_cast<int>(fog.mode)},
+        {"color", {fog.color.r, fog.color.g, fog.color.b}},
+        {"density", fog.density},
+        {"start", fog.start},
+        {"end", fog.end}
+    };
+
+    if (Skybox* skybox = scene->GetSkybox()) {
+        if (!skybox->GetName().empty()) {
+            j["skybox"] = skybox->GetName();
+        }
+    }
+
+    if (TNode* root = scene->GetRoot()) {
+        j["root"] = SerializeNode(root);
+    }
+    return j;
+}
+
+// Applies grid/clearColor/fog/skybox from JSON onto an existing scene. Shared
+// by LoadScene and RestoreSceneFromString. Does not touch the node tree.
+static void ApplySceneSettingsFromJson(const json& j, Scene* scene) {
+    if (j.contains("showGrid")) {
+        scene->SetGridVisible(j["showGrid"]);
+    }
+    if (j.contains("clearColor") && j["clearColor"].is_array()) {
+        auto c = j["clearColor"];
+        scene->SetClearColor(glm::vec3(c[0], c[1], c[2]));
+    }
+    if (j.contains("fog")) {
+        const auto& fj = j["fog"];
+        FogSettings& fog = scene->GetFog();
+        fog.enabled = fj.value("enabled", false);
+        fog.mode = static_cast<FogMode>(fj.value("mode", 2));
+        if (fj.contains("color") && fj["color"].is_array()) {
+            auto c = fj["color"]; fog.color = glm::vec3(c[0], c[1], c[2]);
+        }
+        fog.density = fj.value("density", 0.03f);
+        fog.start = fj.value("start", 10.0f);
+        fog.end = fj.value("end", 60.0f);
+    }
+    if (j.contains("skybox")) {
+        std::string skyboxFolder = j["skybox"];
+        auto cubemap = ResourceManager::LoadSkyboxFromFolder(skyboxFolder);
+        if (cubemap) {
+            scene->SetSkybox(std::make_shared<Skybox>(cubemap, skyboxFolder));
+        } else {
+            Log::Error("SceneSerializer: failed to reload skybox '" + skyboxFolder + "'");
+        }
+    }
+}
+
 bool SceneSerializer::SaveScene(Scene* scene, const std::string& filePath) {
     if (!scene) {
         Log::Error("Cannot save null scene");
@@ -945,33 +1010,7 @@ bool SceneSerializer::SaveScene(Scene* scene, const std::string& filePath) {
     }
 
     try {
-        json j;
-        j["version"] = 1;
-
-        j["showGrid"] = scene->IsGridVisible();
-        const glm::vec3& clearColor = scene->GetClearColor();
-        j["clearColor"] = {clearColor.r, clearColor.g, clearColor.b};
-
-        const FogSettings& fog = scene->GetFog();
-        j["fog"] = {
-            {"enabled", fog.enabled},
-            {"mode", static_cast<int>(fog.mode)},
-            {"color", {fog.color.r, fog.color.g, fog.color.b}},
-            {"density", fog.density},
-            {"start", fog.start},
-            {"end", fog.end}
-        };
-
-        if (Skybox* skybox = scene->GetSkybox()) {
-            if (!skybox->GetName().empty()) {
-                j["skybox"] = skybox->GetName();
-            }
-        }
-
-        TNode* root = scene->GetRoot();
-        if (root) {
-            j["root"] = SerializeNode(root);
-        }
+        json j = SerializeSceneToJson(scene);
 
         std::ofstream file(filePath);
         if (!file.is_open()) {
@@ -1006,34 +1045,7 @@ Scene* SceneSerializer::LoadScene(const std::string& filePath) {
         Scene* scene = new Scene();
         scene->Init();
 
-        if (j.contains("showGrid")) {
-            scene->SetGridVisible(j["showGrid"]);
-        }
-        if (j.contains("clearColor") && j["clearColor"].is_array()) {
-            auto c = j["clearColor"];
-            scene->SetClearColor(glm::vec3(c[0], c[1], c[2]));
-        }
-        if (j.contains("fog")) {
-            const auto& fj = j["fog"];
-            FogSettings& fog = scene->GetFog();
-            fog.enabled = fj.value("enabled", false);
-            fog.mode = static_cast<FogMode>(fj.value("mode", 2));
-            if (fj.contains("color") && fj["color"].is_array()) {
-                auto c = fj["color"]; fog.color = glm::vec3(c[0], c[1], c[2]);
-            }
-            fog.density = fj.value("density", 0.03f);
-            fog.start = fj.value("start", 10.0f);
-            fog.end = fj.value("end", 60.0f);
-        }
-        if (j.contains("skybox")) {
-            std::string skyboxFolder = j["skybox"];
-            auto cubemap = ResourceManager::LoadSkyboxFromFolder(skyboxFolder);
-            if (cubemap) {
-                scene->SetSkybox(std::make_shared<Skybox>(cubemap, skyboxFolder));
-            } else {
-                Log::Error("SceneSerializer: failed to reload skybox '" + skyboxFolder + "'");
-            }
-        }
+        ApplySceneSettingsFromJson(j, scene);
 
         if (j.contains("root")) {
             TNode* root = DeserializeNode(j["root"], scene);
@@ -1081,5 +1093,44 @@ TNode* SceneSerializer::DeserializeNodeFromString(const std::string& jsonStr, Sc
     } catch (const std::exception& e) {
         Log::Error(std::string("Error pasting node: ") + e.what());
         return nullptr;
+    }
+}
+
+std::string SceneSerializer::SerializeSceneToString(Scene* scene) {
+    if (!scene) return "";
+    try {
+        return SerializeSceneToJson(scene).dump();
+    } catch (const std::exception& e) {
+        Log::Error(std::string("Error serializing scene: ") + e.what());
+        return "";
+    }
+}
+
+bool SceneSerializer::RestoreSceneFromString(const std::string& jsonStr, Scene* scene) {
+    if (!scene || jsonStr.empty()) return false;
+
+    PendingAnimationScopeGuard pendingGuard;
+    try {
+        json j = json::parse(jsonStr);
+
+        // Wipe the current tree/registries and rebuild in-place so the Scene*
+        // pointer itself stays valid (the renderer and SceneManager keep
+        // holding it across an undo).
+        scene->Clear();
+        scene->Init();
+
+        ApplySceneSettingsFromJson(j, scene);
+
+        if (j.contains("root")) {
+            TNode* root = DeserializeNode(j["root"], scene);
+            if (root) {
+                scene->GetRoot()->addChild(root);
+            }
+        }
+        ResolvePendingAnimationData();
+        return true;
+    } catch (const std::exception& e) {
+        Log::Error(std::string("Error restoring scene: ") + e.what());
+        return false;
     }
 }

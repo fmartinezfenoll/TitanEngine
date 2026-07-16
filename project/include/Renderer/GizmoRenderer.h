@@ -9,6 +9,14 @@ public:
 
     static void DrawLightGizmo(const glm::vec3& worldPos, const glm::vec3& color,
                                const glm::mat4& view, const glm::mat4& projection);
+    // Wireframe visualization of a Point light's range (sphere) or a Spot
+    // light's range+outer cone angle -- drawn only for the selected light so
+    // it doesn't clutter the viewport with every light's full range.
+    static void DrawPointRangeGizmo(const glm::vec3& worldPos, float range,
+                                    const glm::mat4& view, const glm::mat4& projection);
+    static void DrawSpotRangeGizmo(const glm::vec3& worldPos, const glm::vec3& direction,
+                                   float range, float outerConeDegrees,
+                                   const glm::mat4& view, const glm::mat4& projection);
     static void DrawCameraGizmo(const glm::mat4& cameraModelMatrix,
                                 const glm::mat4& view, const glm::mat4& projection);
     static void DrawSelectionBox(const glm::vec3& worldCenter, const glm::vec3& worldExtents,
@@ -64,4 +72,12 @@ private:
     static inline unsigned int GridVAO = 0;
     static inline unsigned int GridVBO = 0;
     static inline int GridVertexCount = 0;
+
+    static inline unsigned int UnitSphereVAO = 0;
+    static inline unsigned int UnitSphereVBO = 0;
+    static inline int UnitSphereVertexCount = 0;
+
+    static inline unsigned int UnitConeVAO = 0;
+    static inline unsigned int UnitConeVBO = 0;
+    static inline int UnitConeVertexCount = 0;
 };

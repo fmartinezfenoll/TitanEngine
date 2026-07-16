@@ -68,6 +68,11 @@ public:
     static const std::string& GetLastActiveScene() { return lastActiveScene; }
     static void SetLastActiveScene(const std::string& name) { lastActiveScene = name; }
 
+    // Maximum number of undo steps kept in the editor's history. Older steps are
+    // discarded once the limit is reached (bounds memory use per snapshot).
+    static int GetUndoHistoryLimit() { return undoHistoryLimit; }
+    static void SetUndoHistoryLimit(int limit) { undoHistoryLimit = limit < 1 ? 1 : limit; }
+
 private:
     static inline bool frustumCullingEnabled = true;
     static inline bool distanceCullEnabled = false;
@@ -86,4 +91,5 @@ private:
     static inline bool autoSaveEnabled = true;
     static inline float autoSaveIntervalSeconds = 300.0f;
     static inline std::string lastActiveScene = "";
+    static inline int undoHistoryLimit = 25;
 };

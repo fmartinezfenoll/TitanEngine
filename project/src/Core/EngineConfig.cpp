@@ -111,6 +111,10 @@ void EngineConfig::Load(const std::string& path)
     if (it != values.end())
         EngineSettings::SetLastActiveScene(it->second);
 
+    it = values.find("UndoHistoryLimit");
+    if (it != values.end())
+        EngineSettings::SetUndoHistoryLimit(std::stoi(it->second));
+
     Log::Info("Loaded engine settings from " + path);
 }
 
@@ -139,4 +143,5 @@ void EngineConfig::Save(const std::string& path)
     file << "AutoSave=" << (EngineSettings::IsAutoSaveEnabled() ? 1 : 0) << "\n";
     file << "AutoSaveIntervalSeconds=" << EngineSettings::GetAutoSaveIntervalSeconds() << "\n";
     file << "LastActiveScene=" << EngineSettings::GetLastActiveScene() << "\n";
+    file << "UndoHistoryLimit=" << EngineSettings::GetUndoHistoryLimit() << "\n";
 }

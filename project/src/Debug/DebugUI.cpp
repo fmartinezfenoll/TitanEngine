@@ -31,6 +31,7 @@
 #include "Debug/ImGuiLayoutUtils.h"
 #include "Core/Stats.h"
 #include "Core/EngineSettings.h"
+#include "Core/UndoManager.h"
 #include "Core/EngineConfig.h"
 #include <imgui.h>
 #include <glm/glm.hpp>
@@ -47,6 +48,16 @@
 #include <cfloat>
 
 namespace {
+
+// Call right after an editable Inspector widget: if the user just started
+// interacting with it this frame (IsItemActivated -> first frame of a drag/edit,
+// before the value changes), snapshot the pre-edit scene state so one Ctrl+Z
+// reverts the whole edit gesture rather than each intermediate frame.
+void SnapshotOnEdit(Scene* scene) {
+    if (ImGui::IsItemActivated()) {
+        UndoManager::PushSnapshot(scene);
+    }
+}
 
 struct SceneStats {
     int nodeCount = 0;
@@ -766,6 +777,10 @@ void DebugUI::BeginGizmoDrag(GizmoHandle handle, Scene* activeScene) {
     TNode* node = selectedNode;
     if (!node || !activeScene || handle == GizmoHandle::None || node->locked) return;
 
+    // Snapshot the pre-drag state once, at drag start (not per-frame during the
+    // drag), so one Ctrl+Z reverts the whole move/rotate/scale gesture.
+    UndoManager::PushSnapshot(activeScene);
+
     bool isMoveHandle = handle == GizmoHandle::MoveX || handle == GizmoHandle::MoveY || handle == GizmoHandle::MoveZ;
     if (isMoveHandle && ImGui::GetIO().KeyCtrl && node->parent) {
         TNode* duplicate = SceneSerializer::DuplicateNode(node, activeScene);
@@ -931,6 +946,14 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
     Scene* activeScene = sceneManager->GetActiveScene();
     if (!activeScene) return;
 
+    // Clear undo history when the active scene changes so Ctrl+Z can't restore
+    // one scene's snapshot into a different scene.
+    static Scene* lastUndoScene = nullptr;
+    if (activeScene != lastUndoScene) {
+        UndoManager::Clear();
+        lastUndoScene = activeScene;
+    }
+
     DrawDockspace();
 
     UpdateAutoSave(sceneManager);
@@ -963,6 +986,21 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
             showSaveConfirm = true;
         }
 
+        // Undo: Ctrl+Z. Redo: Ctrl+Y or Ctrl+Shift+Z. Restoring rebuilds the
+        // scene from a snapshot, so the current selection pointer is no longer
+        // valid afterward -- clear it to avoid dangling into freed nodes.
+        if (ImGui::GetIO().KeyCtrl && !ImGui::GetIO().KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z)) {
+            if (UndoManager::Undo(activeScene)) {
+                SelectNode(nullptr);
+            }
+        }
+        if (ImGui::GetIO().KeyCtrl && (ImGui::IsKeyPressed(ImGuiKey_Y)
+            || (ImGui::GetIO().KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z)))) {
+            if (UndoManager::Redo(activeScene)) {
+                SelectNode(nullptr);
+            }
+        }
+
         if (selectedNode) {
             if (ImGui::IsKeyPressed(ImGuiKey_W)) gizmoMode = GizmoMode::Move;
             if (ImGui::IsKeyPressed(ImGuiKey_E)) gizmoMode = GizmoMode::Rotate;
@@ -972,6 +1010,7 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
             if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D)) {
                 TNode* parent = selectedNode->parent;
                 if (parent) {
+                    UndoManager::PushSnapshot(activeScene);
                     TNode* duplicate = SceneSerializer::DuplicateNode(selectedNode, activeScene);
                     if (duplicate) {
                         parent->addChild(duplicate);
@@ -987,6 +1026,7 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
 
         if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_V) && !copiedNodeJson.empty()) {
             TNode* parent = selectedNode ? selectedNode : activeScene->GetRoot();
+            UndoManager::PushSnapshot(activeScene);
             if (TNode* pasted = SceneSerializer::DeserializeNodeFromString(copiedNodeJson, activeScene)) {
                 parent->addChild(pasted);
                 SelectNode(pasted);
@@ -1132,6 +1172,31 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
             ImGui::TreePop();
         }
 
+        if (ImGui::TreeNode("Undo/Redo")) {
+            int historyLimit = EngineSettings::GetUndoHistoryLimit();
+            ImGui::SetNextItemWidth(120);
+            if (ImGui::DragInt("History Limit", &historyLimit, 1.0f, 1, 500)) {
+                EngineSettings::SetUndoHistoryLimit(historyLimit);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Maximum number of undo steps kept (Ctrl+Z).\nOlder steps are discarded once the limit is reached.");
+            }
+
+            ImGui::BeginDisabled(!UndoManager::CanUndo());
+            if (ImGui::SmallButton("Undo (Ctrl+Z)")) {
+                if (UndoManager::Undo(activeScene)) SelectNode(nullptr);
+            }
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            ImGui::BeginDisabled(!UndoManager::CanRedo());
+            if (ImGui::SmallButton("Redo (Ctrl+Y)")) {
+                if (UndoManager::Redo(activeScene)) SelectNode(nullptr);
+            }
+            ImGui::EndDisabled();
+
+            ImGui::TreePop();
+        }
+
         if (ImGui::Button("Save Settings")) {
             EngineConfig::Save();
         }
@@ -1190,7 +1255,8 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
                     }
                     if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kNodeDragPayloadType)) {
                         TNode* dragged = *static_cast<TNode**>(payload->Data);
-                        if (root && dragged && dragged != root) {
+                        if (root && dragged && dragged != root && dragged->parent != root) {
+                            UndoManager::PushSnapshot(activeScene);
                             root->addChild(dragged);
                         }
                     }
@@ -1373,6 +1439,7 @@ void DebugUI::DrawSceneTree(TNode* node, Scene* activeScene, int depth) {
                 if (ancestor == dragged) { isDescendant = true; break; }
             }
             if (dragged && dragged != node && !isDescendant) {
+                UndoManager::PushSnapshot(activeScene);
                 node->addChild(dragged); // addChild already detaches from its old parent
             }
         }
@@ -1418,6 +1485,7 @@ void DebugUI::DrawSceneTree(TNode* node, Scene* activeScene, int depth) {
 
             if (ImGui::MenuItem("Duplicate")) {
                 if (node->parent) {
+                    UndoManager::PushSnapshot(activeScene);
                     if (TNode* duplicate = SceneSerializer::DuplicateNode(node, activeScene)) {
                         node->parent->addChild(duplicate);
                         SelectNode(duplicate);
@@ -1430,6 +1498,7 @@ void DebugUI::DrawSceneTree(TNode* node, Scene* activeScene, int depth) {
             }
 
             if (ImGui::MenuItem("Paste", nullptr, false, !copiedNodeJson.empty())) {
+                UndoManager::PushSnapshot(activeScene);
                 if (TNode* pasted = SceneSerializer::DeserializeNodeFromString(copiedNodeJson, activeScene)) {
                     node->addChild(pasted);
                     SelectNode(pasted);
@@ -1457,6 +1526,7 @@ void DebugUI::DrawSceneTree(TNode* node, Scene* activeScene, int depth) {
 
             // --- Create a new child node ---
             if (ImGui::MenuItem("Create Empty")) {
+                UndoManager::PushSnapshot(activeScene);
                 TNode* empty = new TNode(nullptr, "Empty");
                 node->addChild(empty);
                 SelectNode(empty);
@@ -1615,12 +1685,14 @@ void DebugUI::DrawInspector(Scene* activeScene) {
             ImGui::Indent();
 
             ImGui::DragFloat3("Position##inspector", &selectedNode->transform.position.x, 0.1f);
+            SnapshotOnEdit(activeScene);
             ImGui::SameLine();
-            if (ImGui::SmallButton("Reset##pos")) selectedNode->transform.position = glm::vec3(0.0f);
+            if (ImGui::SmallButton("Reset##pos")) { UndoManager::PushSnapshot(activeScene); selectedNode->transform.position = glm::vec3(0.0f); }
 
             ImGui::DragFloat3("Rotation##inspector", &selectedNode->transform.rotation.x, 1.0f);
+            SnapshotOnEdit(activeScene);
             ImGui::SameLine();
-            if (ImGui::SmallButton("Reset##rot")) selectedNode->transform.rotation = glm::vec3(0.0f);
+            if (ImGui::SmallButton("Reset##rot")) { UndoManager::PushSnapshot(activeScene); selectedNode->transform.rotation = glm::vec3(0.0f); }
 
             {
                 glm::vec3 beforeScale = selectedNode->transform.scale;
@@ -1638,9 +1710,10 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                         break;
                     }
                 }
+                SnapshotOnEdit(activeScene);
             }
             ImGui::SameLine();
-            if (ImGui::SmallButton("Reset##scale")) selectedNode->transform.scale = glm::vec3(1.0f);
+            if (ImGui::SmallButton("Reset##scale")) { UndoManager::PushSnapshot(activeScene); selectedNode->transform.scale = glm::vec3(1.0f); }
 
             float checkboxWidth = ImGui::GetFrameHeight();
             ImGui::TextDisabled("Scale Lock");
@@ -1789,6 +1862,7 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                 ImGui::Text("Light (%s):", typeName);
                 ImGui::SameLine();
                 if (ImGui::SmallButton("Remove##light")) {
+                    UndoManager::PushSnapshot(activeScene);
                     if (activeScene) {
                         activeScene->UnregisterLight(selectedNode);
                     }
@@ -1796,15 +1870,21 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                 } else {
                     ImGui::Indent();
                     ImGui::ColorEdit3("Color##light", &light->color.x);
+                    SnapshotOnEdit(activeScene);
                     ImGui::DragFloat("Intensity##light", &light->intensity, 0.05f, 0.0f, 100.0f);
+                    SnapshotOnEdit(activeScene);
                     if (light->type != LightType::Directional) {
                         ImGui::DragFloat("Range##light", &light->range, 0.1f, 0.01f, 1000.0f);
+                        SnapshotOnEdit(activeScene);
                     }
                     if (light->type == LightType::Spot) {
                         ImGui::DragFloat("Inner Cone##light", &light->innerConeDegrees, 0.5f, 0.0f, light->outerConeDegrees - 0.1f);
+                        SnapshotOnEdit(activeScene);
                         ImGui::DragFloat("Outer Cone##light", &light->outerConeDegrees, 0.5f, light->innerConeDegrees + 0.1f, 89.0f);
+                        SnapshotOnEdit(activeScene);
                     }
                     ImGui::Checkbox("Casts Shadow##light", &light->castsShadow);
+                    SnapshotOnEdit(activeScene);
                     ImGui::Unindent();
                 }
             }
@@ -2410,12 +2490,21 @@ void DebugUI::DeleteNode(TNode* node, Scene* activeScene) {
     delete node;
 }
 
-bool DebugUI::DrawComponentItems(TNode* node, Scene* activeScene) {
+bool DebugUI::DrawComponentItems(TNode* node, Scene* activeScene, bool snapshotBeforeAdd) {
     if (!node) return false;
     bool added = false;
 
+    // When editing a live node (Add Component), snapshot the pre-add state the
+    // first time an item is picked. For the "Create with Component" flow the
+    // node is a detached scratch and the caller snapshots instead, so this is
+    // skipped (snapshotBeforeAdd == false there).
+    auto snap = [&]() {
+        if (snapshotBeforeAdd) UndoManager::PushSnapshot(activeScene);
+    };
+
     // --- Rendering ---
     if (!node->GetComponent<MeshComponent>() && ImGui::MenuItem("Mesh (Cube)")) {
+        snap();
         std::vector<MeshVertex> vertices;
         std::vector<uint32_t> indices;
         GetDefaultCubeMesh(vertices, indices);
@@ -2432,11 +2521,13 @@ bool DebugUI::DrawComponentItems(TNode* node, Scene* activeScene) {
     }
 
     if (!node->GetComponent<MaterialComponent>() && ImGui::MenuItem("Material")) {
+        snap();
         node->AddComponent<MaterialComponent>(std::make_shared<Material>(ResourceManager::LoadShader("pbr")));
         added = true;
     }
 
     if (!node->GetComponent<TerrainComponent>() && ImGui::MenuItem("Terrain")) {
+        snap();
         node->AddComponent<TerrainComponent>(node);
         added = true;
     }
@@ -2445,6 +2536,7 @@ bool DebugUI::DrawComponentItems(TNode* node, Scene* activeScene) {
 
     // --- Scene ---
     if (!node->GetComponent<CameraComponent>() && ImGui::MenuItem("Camera")) {
+        snap();
         node->AddComponent<CameraComponent>(node);
         if (activeScene) activeScene->RegisterCamera(node);
         added = true;
@@ -2452,16 +2544,19 @@ bool DebugUI::DrawComponentItems(TNode* node, Scene* activeScene) {
 
     if (!node->GetComponent<LightComponent>() && ImGui::BeginMenu("Light")) {
         if (ImGui::MenuItem("Directional")) {
+            snap();
             node->AddComponent<LightComponent>(node, LightType::Directional);
             if (activeScene) activeScene->RegisterLight(node);
             added = true;
         }
         if (ImGui::MenuItem("Point")) {
+            snap();
             node->AddComponent<LightComponent>(node, LightType::Point);
             if (activeScene) activeScene->RegisterLight(node);
             added = true;
         }
         if (ImGui::MenuItem("Spot")) {
+            snap();
             node->AddComponent<LightComponent>(node, LightType::Spot);
             if (activeScene) activeScene->RegisterLight(node);
             added = true;
@@ -2473,16 +2568,19 @@ bool DebugUI::DrawComponentItems(TNode* node, Scene* activeScene) {
 
     // --- VFX ---
     if (!node->GetComponent<BillboardComponent>() && ImGui::MenuItem("Billboard")) {
+        snap();
         node->AddComponent<BillboardComponent>();
         added = true;
     }
 
     if (!node->GetComponent<GrassComponent>() && ImGui::MenuItem("Grass")) {
+        snap();
         node->AddComponent<GrassComponent>();
         added = true;
     }
 
     if (!node->GetComponent<ParticleSystemComponent>() && ImGui::MenuItem("Particle System")) {
+        snap();
         auto* ps = node->AddComponent<ParticleSystemComponent>();
         ps->ApplyPreset(ParticleSystemComponent::Preset::Fire);
         if (activeScene) activeScene->RegisterAnimator(node);
@@ -2493,18 +2591,21 @@ bool DebugUI::DrawComponentItems(TNode* node, Scene* activeScene) {
 
     // --- Logic / animation ---
     if (!node->GetComponent<AnimationComponent>() && ImGui::MenuItem("Animation")) {
+        snap();
         node->AddComponent<AnimationComponent>(node);
         if (activeScene) activeScene->RegisterAnimator(node);
         added = true;
     }
 
     if (!node->GetComponent<PatrolComponent>() && ImGui::MenuItem("Patrol")) {
+        snap();
         node->AddComponent<PatrolComponent>(node);
         if (activeScene) activeScene->RegisterAnimator(node);
         added = true;
     }
 
     if (!node->GetComponent<CameraPathComponent>() && ImGui::MenuItem("Camera Path")) {
+        snap();
         node->AddComponent<CameraPathComponent>(node);
         if (activeScene) activeScene->RegisterAnimator(node);
         added = true;
@@ -2516,7 +2617,7 @@ bool DebugUI::DrawComponentItems(TNode* node, Scene* activeScene) {
 void DebugUI::DrawAddComponentMenu(TNode* node, Scene* activeScene) {
     if (!node) return;
     if (ImGui::BeginMenu("Add Component")) {
-        DrawComponentItems(node, activeScene);
+        DrawComponentItems(node, activeScene, /*snapshotBeforeAdd=*/true);
         ImGui::EndMenu();
     }
 }
@@ -2533,6 +2634,7 @@ void DebugUI::DrawCreateWithComponentMenu(TNode* parent, Scene* activeScene) {
         // so registering here and parenting immediately after is consistent.
         TNode* scratch = new TNode(nullptr, "Object");
         if (DrawComponentItems(scratch, activeScene)) {
+            UndoManager::PushSnapshot(activeScene);
             parent->addChild(scratch);
             SelectNode(scratch);
         } else {
@@ -2545,8 +2647,17 @@ void DebugUI::DrawCreateWithComponentMenu(TNode* parent, Scene* activeScene) {
 void DebugUI::DrawMaterialFields(const std::shared_ptr<Material>& mat, const std::string* assetPath) {
     if (!mat) return;
 
+    // Editing a node's material is undoable via a scene snapshot; editing a
+    // standalone .material asset is not (it isn't part of the scene, and it
+    // auto-saves to disk instead). So only snapshot when assetPath == nullptr.
+    Scene* undoScene = assetPath ? nullptr : SceneManager::Instance().GetActiveScene();
+    auto snapEdit = [&]() {
+        if (undoScene && ImGui::IsItemActivated()) UndoManager::PushSnapshot(undoScene);
+    };
+
     bool changed = false;
     changed |= ImGui::ColorEdit4("Base Color##material", &mat->baseColor.x);
+    snapEdit();
 
     auto dropTextureSlot = [](const char* label, std::shared_ptr<Texture>& slot) {
         bool dropped = false;
@@ -2575,11 +2686,16 @@ void DebugUI::DrawMaterialFields(const std::shared_ptr<Material>& mat, const std
     changed |= dropTextureSlot("Normal Texture", mat->normal);
     changed |= dropTextureSlot("MetallicRoughness Texture", mat->metallicRoughness);
     changed |= ImGui::SliderFloat("Metallic##material", &mat->metallicFactor, 0.0f, 1.0f);
+    snapEdit();
     changed |= ImGui::SliderFloat("Roughness##material", &mat->roughnessFactor, 0.0f, 1.0f);
+    snapEdit();
     changed |= ImGui::Checkbox("Transparent##material", &mat->transparent);
+    snapEdit();
 
     changed |= ImGui::ColorEdit3("Emissive Color##material", &mat->emissiveColor.x);
+    snapEdit();
     changed |= ImGui::DragFloat("Emissive Intensity##material", &mat->emissiveIntensity, 0.05f, 0.0f, 50.0f);
+    snapEdit();
 
     if (changed && assetPath) {
         MaterialSerializer::Save(mat, *assetPath);
@@ -2880,6 +2996,7 @@ void DebugUI::DrawCreateMenu(TNode* parent, Scene* activeScene) {
 
     // Spawns a primitive node, places it at the spawn point, parents+selects it.
     auto spawnPrimitive = [&](TNode* node) {
+        UndoManager::PushSnapshot(activeScene);
         placeAtSpawnPoint(node);
         parent->addChild(node);
         SelectNode(node);
@@ -2895,6 +3012,7 @@ void DebugUI::DrawCreateMenu(TNode* parent, Scene* activeScene) {
     }
 
     if (ImGui::MenuItem("Camera")) {
+        UndoManager::PushSnapshot(activeScene);
         TNode* node = SpawnCameraNode();
         placeAtSpawnPoint(node);
         parent->addChild(node);
@@ -2902,27 +3020,20 @@ void DebugUI::DrawCreateMenu(TNode* parent, Scene* activeScene) {
         SelectNode(node);
     }
 
+    // Spawns a light of the given type at the spawn point, parents+registers+selects it.
+    auto spawnLight = [&](LightType type, bool atSpawnPoint) {
+        UndoManager::PushSnapshot(activeScene);
+        TNode* node = SpawnLightNode(type);
+        if (atSpawnPoint) placeAtSpawnPoint(node);
+        parent->addChild(node);
+        if (activeScene) activeScene->RegisterLight(node);
+        SelectNode(node);
+    };
+
     if (ImGui::BeginMenu("Light")) {
-        if (ImGui::MenuItem("Directional")) {
-            TNode* node = SpawnLightNode(LightType::Directional);
-            parent->addChild(node);
-            if (activeScene) activeScene->RegisterLight(node);
-            SelectNode(node);
-        }
-        if (ImGui::MenuItem("Point")) {
-            TNode* node = SpawnLightNode(LightType::Point);
-            placeAtSpawnPoint(node);
-            parent->addChild(node);
-            if (activeScene) activeScene->RegisterLight(node);
-            SelectNode(node);
-        }
-        if (ImGui::MenuItem("Spot")) {
-            TNode* node = SpawnLightNode(LightType::Spot);
-            placeAtSpawnPoint(node);
-            parent->addChild(node);
-            if (activeScene) activeScene->RegisterLight(node);
-            SelectNode(node);
-        }
+        if (ImGui::MenuItem("Directional")) spawnLight(LightType::Directional, false);
+        if (ImGui::MenuItem("Point"))       spawnLight(LightType::Point, true);
+        if (ImGui::MenuItem("Spot"))        spawnLight(LightType::Spot, true);
         ImGui::EndMenu();
     }
 }
@@ -2938,7 +3049,7 @@ void DebugUI::DrawNodeDeleteConfirmation() {
 
     bool open = true;
     if (ImGui::Begin("Delete Node?", &open, ImGuiWindowFlags_Modal | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextWrapped("Are you sure you want to delete:\n\n\"%s\"\n\nThis will also delete all of its children. This action cannot be undone.", nodeName.c_str());
+        ImGui::TextWrapped("Are you sure you want to delete:\n\n\"%s\"\n\nThis will also delete all of its children. You can undo this with Ctrl+Z.", nodeName.c_str());
         ImGui::Spacing();
         ImGui::Separator();
         ImGui::Spacing();
@@ -2949,7 +3060,9 @@ void DebugUI::DrawNodeDeleteConfirmation() {
         ImGui::SetCursorPosX(std::max(0.0f, (ImGui::GetWindowSize().x - totalWidth) * 0.5f));
 
         if (ImGui::Button("Delete Forever##node", ImVec2(buttonWidth, 0))) {
-            DeleteNode(nodeToDelete, SceneManager::Instance().GetActiveScene());
+            Scene* scene = SceneManager::Instance().GetActiveScene();
+            UndoManager::PushSnapshot(scene);
+            DeleteNode(nodeToDelete, scene);
             nodeToDelete = nullptr;
             showNodeDeleteConfirm = false;
         }
@@ -2979,7 +3092,7 @@ void DebugUI::DrawMultiDeleteConfirmation() {
 
     bool open = true;
     if (ImGui::Begin("Delete Nodes?", &open, ImGuiWindowFlags_Modal | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextWrapped("Are you sure you want to delete %zu selected nodes?\n\nThis will also delete all of their children. This action cannot be undone.", multiSelectedNodes.size());
+        ImGui::TextWrapped("Are you sure you want to delete %zu selected nodes?\n\nThis will also delete all of their children. You can undo this with Ctrl+Z.", multiSelectedNodes.size());
         ImGui::Spacing();
         ImGui::Separator();
         ImGui::Spacing();
@@ -2992,6 +3105,7 @@ void DebugUI::DrawMultiDeleteConfirmation() {
         if (ImGui::Button("Delete Forever##multi", ImVec2(buttonWidth, 0))) {
             std::vector<TNode*> toDelete = multiSelectedNodes;
             Scene* activeScene = SceneManager::Instance().GetActiveScene();
+            UndoManager::PushSnapshot(activeScene);
             for (TNode* node : toDelete) {
                 DeleteNode(node, activeScene);
             }

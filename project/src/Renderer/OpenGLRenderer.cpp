@@ -578,6 +578,13 @@ void OpenGLRenderer::DrawSelectionHighlight(Scene* activeScene, const glm::mat4&
     }
 
     if (auto* light = selected->GetComponent<LightComponent>()) {
+        if (light->type == LightType::Point) {
+            GizmoRenderer::DrawPointRangeGizmo(light->GetPosition(), light->range, view, projection);
+        } else if (light->type == LightType::Spot) {
+            GizmoRenderer::DrawSpotRangeGizmo(light->GetPosition(), light->GetDirection(),
+                light->range, light->outerConeDegrees, view, projection);
+        }
+
         GizmoRenderer::DrawSelectionBox(light->GetPosition(),
             glm::vec3(GizmoRenderer::kLightGizmoRadius * 1.3f), view, projection);
         return;

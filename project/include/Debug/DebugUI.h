@@ -52,7 +52,7 @@ private:
     // `node` (guarded so an already-present component is disabled). Shared by
     // "Add Component" (on the selected node) and "Create with Component" (which
     // makes a fresh node first). Returns true if a component was added.
-    static bool DrawComponentItems(TNode* node, Scene* activeScene);
+    static bool DrawComponentItems(TNode* node, Scene* activeScene, bool snapshotBeforeAdd = false);
     // Creates a fresh empty child under `parent`, then opens the shared
     // component list so the click both creates the node and attaches a component.
     static void DrawCreateWithComponentMenu(TNode* parent, Scene* activeScene);

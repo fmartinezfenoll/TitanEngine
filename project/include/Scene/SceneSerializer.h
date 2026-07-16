@@ -16,4 +16,11 @@ public:
     // Reconstructs a node (and its subtree) from a string previously produced by
     // SerializeNodeToString(). Returns nullptr on parse/deserialize failure.
     static TNode* DeserializeNodeFromString(const std::string& json, Scene* scene);
+
+    // Whole-scene snapshot to/from a JSON string, used by the undo/redo history.
+    // SerializeSceneToString captures grid/clearColor/fog/skybox + the full node
+    // tree. RestoreSceneFromString wipes `scene` and rebuilds it in-place from a
+    // snapshot (keeps the same Scene* pointer valid). Returns false on failure.
+    static std::string SerializeSceneToString(Scene* scene);
+    static bool RestoreSceneFromString(const std::string& json, Scene* scene);
 };

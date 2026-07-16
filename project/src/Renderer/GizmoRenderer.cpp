@@ -44,6 +44,39 @@ std::vector<glm::vec3> BuildWireSphere(float radius, int segments)
     return lines;
 }
 
+std::vector<glm::vec3> BuildWireConeUnit(int segments)
+{
+    // Apex at origin, opening toward -Z (matches the engine's forward
+    // convention), unit height and unit base radius -- callers scale height
+    // and radius independently to represent a light's range + outer cone angle.
+    std::vector<glm::vec3> lines;
+    glm::vec3 apex(0.0f);
+
+    std::vector<glm::vec3> ring;
+    ring.reserve(segments);
+    for (int i = 0; i < segments; ++i) {
+        float a = (2.0f * kPi * i) / segments;
+        ring.push_back({ cos(a), sin(a), -1.0f });
+    }
+
+    // Base circle.
+    for (int i = 0; i < segments; ++i) {
+        lines.push_back(ring[i]);
+        lines.push_back(ring[(i + 1) % segments]);
+    }
+
+    // A handful of lines from the apex to the base circle (not every vertex,
+    // to keep the wireframe legible).
+    int spokes = 8;
+    for (int i = 0; i < spokes; ++i) {
+        int idx = (i * segments) / spokes;
+        lines.push_back(apex);
+        lines.push_back(ring[idx]);
+    }
+
+    return lines;
+}
+
 std::vector<glm::vec3> BuildWireFrustum(float depth)
 {
     // Apex at origin, looking down -Z, matching the engine's forward convention.
@@ -200,6 +233,14 @@ void GizmoRenderer::Init()
     auto shaftVerts = BuildWireShaft(kGizmoArmLength);
     ShaftVAO = UploadLineVAO(shaftVerts, ShaftVBO);
     ShaftVertexCount = static_cast<int>(shaftVerts.size());
+
+    auto unitSphereVerts = BuildWireSphere(1.0f, 24);
+    UnitSphereVAO = UploadLineVAO(unitSphereVerts, UnitSphereVBO);
+    UnitSphereVertexCount = static_cast<int>(unitSphereVerts.size());
+
+    auto unitConeVerts = BuildWireConeUnit(24);
+    UnitConeVAO = UploadLineVAO(unitConeVerts, UnitConeVBO);
+    UnitConeVertexCount = static_cast<int>(unitConeVerts.size());
 }
 
 void GizmoRenderer::Shutdown()
@@ -218,6 +259,10 @@ void GizmoRenderer::Shutdown()
     glDeleteBuffers(1, &ShaftVBO);
     glDeleteVertexArrays(1, &GridVAO);
     glDeleteBuffers(1, &GridVBO);
+    glDeleteVertexArrays(1, &UnitSphereVAO);
+    glDeleteBuffers(1, &UnitSphereVBO);
+    glDeleteVertexArrays(1, &UnitConeVAO);
+    glDeleteBuffers(1, &UnitConeVBO);
 }
 
 void GizmoRenderer::DrawLightGizmo(const glm::vec3& worldPos, const glm::vec3& color,
@@ -236,6 +281,54 @@ void GizmoRenderer::DrawLightGizmo(const glm::vec3& worldPos, const glm::vec3& c
 
     glBindVertexArray(SphereVAO);
     glDrawArrays(GL_LINES, 0, SphereVertexCount);
+}
+
+void GizmoRenderer::DrawPointRangeGizmo(const glm::vec3& worldPos, float range,
+                                        const glm::mat4& view, const glm::mat4& projection)
+{
+    auto shader = ResourceManager::GetShader("gizmo");
+    if (!shader || range <= 0.0f) return;
+
+    glm::mat4 model = glm::translate(glm::mat4(1.0f), worldPos)
+                       * glm::scale(glm::mat4(1.0f), glm::vec3(range));
+
+    shader->Bind();
+    shader->SetMat4("model", model);
+    shader->SetMat4("view", view);
+    shader->SetMat4("projection", projection);
+    shader->SetVec3("color", glm::vec3(0.9f, 0.8f, 0.3f));
+
+    glBindVertexArray(UnitSphereVAO);
+    glDrawArrays(GL_LINES, 0, UnitSphereVertexCount);
+}
+
+void GizmoRenderer::DrawSpotRangeGizmo(const glm::vec3& worldPos, const glm::vec3& direction,
+                                       float range, float outerConeDegrees,
+                                       const glm::mat4& view, const glm::mat4& projection)
+{
+    auto shader = ResourceManager::GetShader("gizmo");
+    if (!shader || range <= 0.0f) return;
+
+    // The cone template opens toward -Z with unit height/base radius --
+    // orient it so -Z maps onto the light's actual direction.
+    glm::vec3 forward = glm::normalize(direction);
+    glm::vec3 up = (fabs(forward.y) > 0.99f) ? glm::vec3(1.0f, 0.0f, 0.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
+    glm::vec3 right = glm::normalize(glm::cross(up, -forward));
+    up = glm::cross(-forward, right);
+    glm::mat4 rotation(glm::vec4(right, 0.0f), glm::vec4(up, 0.0f), glm::vec4(-forward, 0.0f), glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+
+    float baseRadius = range * tanf(glm::radians(outerConeDegrees));
+    glm::mat4 model = glm::translate(glm::mat4(1.0f), worldPos) * rotation
+                       * glm::scale(glm::mat4(1.0f), glm::vec3(baseRadius, baseRadius, range));
+
+    shader->Bind();
+    shader->SetMat4("model", model);
+    shader->SetMat4("view", view);
+    shader->SetMat4("projection", projection);
+    shader->SetVec3("color", glm::vec3(0.9f, 0.8f, 0.3f));
+
+    glBindVertexArray(UnitConeVAO);
+    glDrawArrays(GL_LINES, 0, UnitConeVertexCount);
 }
 
 void GizmoRenderer::DrawCameraGizmo(const glm::mat4& cameraModelMatrix,
