@@ -21,6 +21,15 @@ uniform samplerCube irradianceMap;
 uniform samplerCube prefilterMap;
 uniform sampler2D brdfLUT;
 
+// Distance fog. fogMode: 0 = Linear, 1 = Exp, 2 = Exp2. Blended over the final
+// lit color based on the fragment's distance to the camera.
+uniform bool fogEnabled;
+uniform int fogMode;
+uniform vec3 fogColor;
+uniform float fogDensity;
+uniform float fogStart;
+uniform float fogEnd;
+
 const float PI = 3.14159265359;
 
 #define MAX_LIGHTS 32
@@ -264,6 +273,20 @@ void main()
     vec3 result = (lightCount > 0)
         ? ambient + lighting
         : albedo * (max(dot(normal, normalize(vec3(0.4, 0.8, 0.6))), 0.0) * 0.7 + 0.3);
+
+    if (fogEnabled)
+    {
+        float dist = length(WorldPos - cameraWorldPos);
+        float fogFactor;
+        if (fogMode == 0)        // Linear
+            fogFactor = clamp((fogEnd - dist) / max(fogEnd - fogStart, 0.0001), 0.0, 1.0);
+        else if (fogMode == 1)   // Exp
+            fogFactor = exp(-fogDensity * dist);
+        else                     // Exp2
+            fogFactor = exp(-(fogDensity * dist) * (fogDensity * dist));
+        fogFactor = clamp(fogFactor, 0.0, 1.0);
+        result = mix(fogColor, result, fogFactor); // fogFactor=1 -> no fog
+    }
 
     FragColor = vec4(result, color.a);
 }

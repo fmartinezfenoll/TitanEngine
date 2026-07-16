@@ -4,6 +4,8 @@
 #include <memory>
 
 class Skybox;
+// FogSettings / FogMode live in LightUniformData.h (included via TNode.h) so
+// MeshComponent::Draw can take them without a Scene <-> MeshComponent include cycle.
 
 class Scene {
 public:
@@ -50,6 +52,9 @@ public:
     const glm::vec3& GetClearColor() const { return clearColor; }
     void SetClearColor(const glm::vec3& color) { clearColor = color; }
 
+    FogSettings& GetFog() { return fog; }
+    const FogSettings& GetFog() const { return fog; }
+
 private:
     TNode* root = nullptr;
     std::vector<TNode*> cameras;
@@ -59,4 +64,5 @@ private:
     std::shared_ptr<Skybox> skybox;
     bool showGrid = true;
     glm::vec3 clearColor{0.1f, 0.1f, 0.15f};
+    FogSettings fog;
 };

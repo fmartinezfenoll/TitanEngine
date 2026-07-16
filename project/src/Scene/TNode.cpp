@@ -41,14 +41,26 @@ void Frustum::updateFromCamera(const glm::mat4& vp) {
 void TNode::draw(const Frustum& frustum, const glm::mat4& view, const glm::mat4& projection,
                  const glm::vec3& cameraWorldPos, const std::vector<LightUniformData>& lights,
                  const ShadowRenderData& shadowData, const IBLRenderData& iblData,
-                 std::vector<TransparentDrawItem>* outTransparent, const glm::mat4& parentMatrix) {
+                 std::vector<TransparentDrawItem>* outTransparent, const glm::mat4& parentMatrix,
+                 const FogSettings* fog) {
     glm::mat4 modelMatrix = parentMatrix * transform.getModelMatrix();
 
     bool passesCulling = !EngineSettings::IsFrustumCullingEnabled()
         || !boundingBox || boundingBox->isOnFrustum(frustum, modelMatrix);
 
+    // Distance cull: skip drawing this node's own mesh if its world origin is
+    // beyond the global max draw distance. Children are still recursed (a close
+    // child of a far parent should still draw), so this culls per-node, not the
+    // whole subtree.
+    bool withinDrawDistance = true;
+    if (EngineSettings::IsDistanceCullEnabled()) {
+        glm::vec3 worldPos(modelMatrix[3]);
+        float maxDist = EngineSettings::GetMaxDrawDistance();
+        withinDrawDistance = glm::dot(worldPos - cameraWorldPos, worldPos - cameraWorldPos) <= maxDist * maxDist;
+    }
+
     if (passesCulling) {
-        if (visible) {
+        if (visible && withinDrawDistance) {
             if (auto* mesh = GetComponent<MeshComponent>()) {
                 auto* materialComp = GetComponent<MaterialComponent>();
                 bool isTransparent = materialComp && materialComp->material && materialComp->material->transparent;
@@ -56,14 +68,14 @@ void TNode::draw(const Frustum& frustum, const glm::mat4& view, const glm::mat4&
                     outTransparent->push_back({this, modelMatrix});
                 } else {
                     mesh->Draw(modelMatrix, materialComp, view, projection, cameraWorldPos, lights, shadowData, iblData,
-                               GetComponent<SkinComponent>());
+                               GetComponent<SkinComponent>(), fog);
                 }
             }
         }
 
         for (TNode* child : children) {
             if (child) {
-                child->draw(frustum, view, projection, cameraWorldPos, lights, shadowData, iblData, outTransparent, modelMatrix);
+                child->draw(frustum, view, projection, cameraWorldPos, lights, shadowData, iblData, outTransparent, modelMatrix, fog);
             }
         }
     }

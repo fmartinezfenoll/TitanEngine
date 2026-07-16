@@ -55,6 +55,14 @@ void EngineConfig::Load(const std::string& path)
     if (it != values.end())
         EngineSettings::SetFrustumCullingEnabled(ToBool(it->second, EngineSettings::IsFrustumCullingEnabled()));
 
+    it = values.find("DistanceCull");
+    if (it != values.end())
+        EngineSettings::SetDistanceCullEnabled(ToBool(it->second, EngineSettings::IsDistanceCullEnabled()));
+
+    it = values.find("MaxDrawDistance");
+    if (it != values.end())
+        EngineSettings::SetMaxDrawDistance(std::stof(it->second));
+
     it = values.find("Shadows");
     if (it != values.end())
         EngineSettings::SetShadowsEnabled(ToBool(it->second, EngineSettings::AreShadowsEnabled()));
@@ -113,6 +121,8 @@ void EngineConfig::Save(const std::string& path)
 
     file << "VSync=" << (EngineSettings::IsVSyncEnabled() ? 1 : 0) << "\n";
     file << "FrustumCulling=" << (EngineSettings::IsFrustumCullingEnabled() ? 1 : 0) << "\n";
+    file << "DistanceCull=" << (EngineSettings::IsDistanceCullEnabled() ? 1 : 0) << "\n";
+    file << "MaxDrawDistance=" << EngineSettings::GetMaxDrawDistance() << "\n";
     file << "Shadows=" << (EngineSettings::AreShadowsEnabled() ? 1 : 0) << "\n";
     file << "IBL=" << (EngineSettings::IsIBLEnabled() ? 1 : 0) << "\n";
     file << "ShadowResolution2D=" << EngineSettings::GetShadowResolution2D() << "\n";

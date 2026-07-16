@@ -43,6 +43,14 @@ private:
     static void SelectScene();
     static void DeleteNode(TNode* node, Scene* activeScene);
     static void DrawAddComponentMenu(TNode* node, Scene* activeScene);
+    // Emits one MenuItem per component type, each adding that component to
+    // `node` (guarded so an already-present component is disabled). Shared by
+    // "Add Component" (on the selected node) and "Create with Component" (which
+    // makes a fresh node first). Returns true if a component was added.
+    static bool DrawComponentItems(TNode* node, Scene* activeScene);
+    // Creates a fresh empty child under `parent`, then opens the shared
+    // component list so the click both creates the node and attaches a component.
+    static void DrawCreateWithComponentMenu(TNode* parent, Scene* activeScene);
     static void DrawSaveMaterialPopup(const std::shared_ptr<Material>& material);
     // assetPath == nullptr: editing a node's MaterialComponent (manual "Save As..." only).
     // assetPath != nullptr: editing a standalone .material asset directly -- every changed

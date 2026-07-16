@@ -133,7 +133,7 @@ void MeshComponent::Draw(const glm::mat4& modelMatrix, MaterialComponent* materi
                          const glm::mat4& view, const glm::mat4& projection, const glm::vec3& cameraWorldPos,
                          const std::vector<LightUniformData>& lights,
                          const ShadowRenderData& shadowData, const IBLRenderData& iblData,
-                         SkinComponent* skin) const {
+                         SkinComponent* skin, const FogSettings* fog) const {
     if (!material || !material->material) return;
 
     auto shader = material->material->GetShader();
@@ -224,6 +224,18 @@ void MeshComponent::Draw(const glm::mat4& modelMatrix, MaterialComponent* materi
     shader->SetInt("irradianceMap", static_cast<int>(iblData.irradianceSlot));
     shader->SetInt("prefilterMap", static_cast<int>(iblData.prefilterSlot));
     shader->SetInt("brdfLUT", static_cast<int>(iblData.brdfLUTSlot));
+
+    // Distance fog (only pbr/pbr_skinned declare these uniforms; SetInt on a
+    // missing location is a silent no-op for any other shader).
+    bool fogOn = fog && fog->enabled;
+    shader->SetBool("fogEnabled", fogOn);
+    if (fogOn) {
+        shader->SetInt("fogMode", static_cast<int>(fog->mode));
+        shader->SetVec3("fogColor", fog->color);
+        shader->SetFloat("fogDensity", fog->density);
+        shader->SetFloat("fogStart", fog->start);
+        shader->SetFloat("fogEnd", fog->end);
+    }
 
     glBindVertexArray(VAO);
     glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(IndexCount), GL_UNSIGNED_INT, 0);

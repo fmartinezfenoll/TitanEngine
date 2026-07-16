@@ -7,6 +7,14 @@ public:
     static bool IsFrustumCullingEnabled() { return frustumCullingEnabled; }
     static void SetFrustumCullingEnabled(bool enabled) { frustumCullingEnabled = enabled; }
 
+    // Distance culling: nodes whose world origin is farther than the max draw
+    // distance from the camera are skipped (per-node, not per-subtree).
+    static bool IsDistanceCullEnabled() { return distanceCullEnabled; }
+    static void SetDistanceCullEnabled(bool enabled) { distanceCullEnabled = enabled; }
+
+    static float GetMaxDrawDistance() { return maxDrawDistance; }
+    static void SetMaxDrawDistance(float distance) { maxDrawDistance = distance; }
+
     static bool AreShadowsEnabled() { return shadowsEnabled; }
     static void SetShadowsEnabled(bool enabled) { shadowsEnabled = enabled; }
 
@@ -56,6 +64,8 @@ public:
 
 private:
     static inline bool frustumCullingEnabled = true;
+    static inline bool distanceCullEnabled = false;
+    static inline float maxDrawDistance = 200.0f;
     static inline bool shadowsEnabled = true;
     static inline bool vsyncEnabled = true;
     static inline bool iblEnabled = true;

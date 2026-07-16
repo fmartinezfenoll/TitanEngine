@@ -1,8 +1,8 @@
 // Builds the built-in demo/test scenes (Triangle, Square, GLTF, Duck,
-// Animation Test, VFX Test) the first time the engine runs with no scenes/
-// directory -- exercises engine features (glTF loading, skinning, patrol,
-// state machines, camera paths, skybox/lighting, grass/billboards/particles)
-// without needing hand-authored .scene files.
+// Animation Test, VFX Test, Terrain Test) the first time the engine runs with
+// no scenes/ directory -- exercises engine features (glTF loading, skinning,
+// patrol, state machines, camera paths, skybox/lighting, grass/billboards/
+// particles, fog, procedural terrain) without needing hand-authored .scene files.
 // Kept separate from Application.cpp so that file stays focused on the
 // actual application lifecycle (Init/Run/Update/Shutdown).
 #include "Core/Application.h"
@@ -24,6 +24,7 @@
 #include "Scene/BillboardComponent.h"
 #include "Scene/GrassComponent.h"
 #include "Scene/ParticleSystemComponent.h"
+#include "Scene/TerrainComponent.h"
 #include "Renderer/Skybox.h"
 #include "Core/EngineSettings.h"
 #include "Core/Log.h"
@@ -306,6 +307,44 @@ void Application::SetupScenes()
         cam->pitch = -18.0f;
         vfxScene->AddNodeToRoot(vfxCamera);
         vfxScene->SetMainCamera(vfxCamera);
+    }
+
+    if (!sm.GetScene("Terrain Test")) {
+        Scene* terrainScene = sm.CreateScene("Terrain Test");
+
+        // Procedural terrain (no heightmap asset needed -- falls back to rolling
+        // hills). Drag a grayscale image onto its Heightmap slot in the Inspector
+        // to use a real one.
+        TNode* terrainNode = new TNode(nullptr, "Terrain");
+        auto* terrain = terrainNode->AddComponent<TerrainComponent>(terrainNode);
+        terrain->size = 120.0f;
+        terrain->resolution = 200;
+        terrain->heightScale = 14.0f;
+        terrain->noiseFrequency = 0.08f;
+        terrain->Generate();
+        terrainScene->AddNodeToRoot(terrainNode);
+
+        // Fog to show off distance atmosphere over the terrain.
+        FogSettings& fog = terrainScene->GetFog();
+        fog.enabled = true;
+        fog.mode = FogMode::Exp2;
+        fog.color = glm::vec3(0.62f, 0.67f, 0.75f);
+        fog.density = 0.012f;
+        terrainScene->SetClearColor(fog.color);
+
+        TNode* sunNode = new TNode(nullptr, "Sun");
+        auto* sun = sunNode->AddComponent<LightComponent>(sunNode, LightType::Directional);
+        sun->intensity = 3.0f;
+        sunNode->transform.rotation = glm::vec3(-50.0f, -30.0f, 0.0f);
+        terrainScene->AddNodeToRoot(sunNode);
+
+        TNode* terrainCamera = new TNode(nullptr, "MainCamera");
+        CameraComponent* cam = terrainCamera->AddComponent<CameraComponent>(terrainCamera);
+        terrainCamera->transform.position = glm::vec3(0.0f, 25.0f, 55.0f);
+        cam->pitch = -22.0f;
+        cam->farPlane = 500.0f;
+        terrainScene->AddNodeToRoot(terrainCamera);
+        terrainScene->SetMainCamera(terrainCamera);
     }
 
     const std::string& lastActiveScene = EngineSettings::GetLastActiveScene();

@@ -6,6 +6,7 @@
 #include "Scene/PrefabSerializer.h"
 #include "Scene/CameraComponent.h"
 #include "Scene/MeshComponent.h"
+#include "Scene/MeshPrimitives.h"
 #include "Scene/MaterialComponent.h"
 #include "Scene/LightComponent.h"
 #include "Scene/AnimationComponent.h"
@@ -14,6 +15,7 @@
 #include "Scene/BillboardComponent.h"
 #include "Scene/GrassComponent.h"
 #include "Scene/ParticleSystemComponent.h"
+#include "Scene/TerrainComponent.h"
 #include "Scene/PatrolComponent.h"
 #include "ResourceManager/Material.h"
 #include "ResourceManager/MaterialSerializer.h"
@@ -122,6 +124,46 @@ TNode* SpawnCubeNode() {
     auto material = std::make_shared<Material>(ResourceManager::LoadShader("pbr"));
     node->AddComponent<MaterialComponent>(material);
     return node;
+}
+
+// Builds a node from a procedurally-generated primitive mesh + a default PBR
+// material, matching SpawnCubeNode's setup (bounds, material).
+TNode* SpawnPrimitiveNode(const char* baseName, const std::vector<MeshVertex>& vertices,
+                          const std::vector<uint32_t>& indices) {
+    TNode* node = new TNode(nullptr, NextName(baseName));
+    auto* mesh = node->AddComponent<MeshComponent>(vertices, indices);
+
+    glm::vec3 localMin, localMax;
+    mesh->GetLocalBounds(localMin, localMax);
+    node->boundingBox = new AABB(localMin, localMax);
+
+    auto material = std::make_shared<Material>(ResourceManager::LoadShader("pbr"));
+    node->AddComponent<MaterialComponent>(material);
+    return node;
+}
+
+TNode* SpawnSphereNode() {
+    std::vector<MeshVertex> v; std::vector<uint32_t> i;
+    MeshPrimitives::Sphere(v, i);
+    return SpawnPrimitiveNode("Sphere", v, i);
+}
+
+TNode* SpawnPlaneNode() {
+    std::vector<MeshVertex> v; std::vector<uint32_t> i;
+    MeshPrimitives::Plane(v, i, 2.0f, 1);
+    return SpawnPrimitiveNode("Plane", v, i);
+}
+
+TNode* SpawnCylinderNode() {
+    std::vector<MeshVertex> v; std::vector<uint32_t> i;
+    MeshPrimitives::Cylinder(v, i);
+    return SpawnPrimitiveNode("Cylinder", v, i);
+}
+
+TNode* SpawnConeNode() {
+    std::vector<MeshVertex> v; std::vector<uint32_t> i;
+    MeshPrimitives::Cone(v, i);
+    return SpawnPrimitiveNode("Cone", v, i);
 }
 
 TNode* SpawnCameraNode() {
@@ -935,6 +977,18 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
             EngineSettings::SetFrustumCullingEnabled(cullingEnabled);
         }
 
+        bool distanceCull = EngineSettings::IsDistanceCullEnabled();
+        if (ImGui::Checkbox("Distance Culling", &distanceCull)) {
+            EngineSettings::SetDistanceCullEnabled(distanceCull);
+        }
+        if (distanceCull) {
+            float maxDist = EngineSettings::GetMaxDrawDistance();
+            ImGui::SetNextItemWidth(120);
+            if (ImGui::DragFloat("Max Draw Distance", &maxDist, 1.0f, 1.0f, 10000.0f, "%.0f")) {
+                EngineSettings::SetMaxDrawDistance(maxDist);
+            }
+        }
+
         bool wireframeEnabled = EngineSettings::IsWireframeEnabled();
         if (ImGui::Checkbox("Wireframe", &wireframeEnabled)) {
             EngineSettings::SetWireframeEnabled(wireframeEnabled);
@@ -1077,14 +1131,13 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
 
                 if (ImGui::BeginPopupContextWindow("SceneRootContextMenu", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems)) {
                     if (root) {
-                        DrawCreateMenu(root, activeScene);
-
-                        ImGui::Separator();
-                        if (ImGui::MenuItem("Add Empty Object")) {
+                        if (ImGui::MenuItem("Create Empty")) {
                             TNode* empty = new TNode(nullptr, "Empty");
                             root->addChild(empty);
                             SelectNode(empty);
                         }
+                        DrawCreateMenu(root, activeScene);          // 3D Object / Camera / Light
+                        DrawCreateWithComponentMenu(root, activeScene); // empty node + any component
                     }
 
                     ImGui::EndPopup();
@@ -1263,6 +1316,7 @@ void DebugUI::DrawSceneTree(TNode* node, Scene* activeScene, int depth) {
                 }
             }
         } else {
+            // --- This node's own actions ---
             if (ImGui::MenuItem("Rename")) {
                 renamingNode = node;
                 renameJustStarted = true;
@@ -1314,15 +1368,18 @@ void DebugUI::DrawSceneTree(TNode* node, Scene* activeScene, int depth) {
 
             ImGui::Separator();
 
-            DrawCreateMenu(node, activeScene);
-
-            if (ImGui::MenuItem("Add Empty Object")) {
+            // --- Create a new child node ---
+            if (ImGui::MenuItem("Create Empty")) {
                 TNode* empty = new TNode(nullptr, "Empty");
                 node->addChild(empty);
                 SelectNode(empty);
             }
+            DrawCreateMenu(node, activeScene);          // 3D Object / Camera / Light
+            DrawCreateWithComponentMenu(node, activeScene); // empty node + any component in one pick
 
             ImGui::Separator();
+
+            // --- Modify this node ---
             DrawAddComponentMenu(node, activeScene);
         }
 
@@ -1403,6 +1460,28 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                 glm::vec3 clearColor = activeScene->GetClearColor();
                 if (ImGui::ColorEdit3("Background Color", &clearColor.x)) {
                     activeScene->SetClearColor(clearColor);
+                }
+
+                ImGui::Spacing();
+                ImGui::Text("Fog:");
+                FogSettings& fog = activeScene->GetFog();
+                ImGui::Checkbox("Enabled##fog", &fog.enabled);
+                if (fog.enabled) {
+                    ImGui::Indent();
+                    const char* fogModes[] = { "Linear", "Exp", "Exp2" };
+                    int modeIdx = static_cast<int>(fog.mode);
+                    ImGui::SetNextItemWidth(120);
+                    if (ImGui::Combo("Mode##fog", &modeIdx, fogModes, IM_ARRAYSIZE(fogModes))) {
+                        fog.mode = static_cast<FogMode>(modeIdx);
+                    }
+                    ImGui::ColorEdit3("Color##fog", &fog.color.x);
+                    if (fog.mode == FogMode::Linear) {
+                        ImGui::DragFloat("Start##fog", &fog.start, 0.5f, 0.0f, 10000.0f);
+                        ImGui::DragFloat("End##fog", &fog.end, 0.5f, 0.0f, 10000.0f);
+                    } else {
+                        ImGui::DragFloat("Density##fog", &fog.density, 0.001f, 0.0f, 1.0f, "%.4f");
+                    }
+                    ImGui::Unindent();
                 }
             }
 
@@ -2049,6 +2128,43 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                 }
             }
 
+            if (auto* terrain = selectedNode->GetComponent<TerrainComponent>()) {
+                ImGui::Spacing();
+                ImGui::Text("Terrain:");
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Remove##terrain")) {
+                    selectedNode->RemoveComponent<TerrainComponent>();
+                } else {
+                    ImGui::Indent();
+
+                    // Heightmap drop target (path only -- the terrain reloads it
+                    // itself with stb to read raw heights, no GPU texture kept).
+                    std::string hmLabel = "Heightmap: " +
+                        (terrain->GetHeightmapPath().empty() ? std::string("None") : terrain->GetHeightmapPath());
+                    ImGui::Button(hmLabel.c_str(), ImVec2(240, 0));
+                    if (ImGui::BeginDragDropTarget()) {
+                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(ProjectBrowser::kTexturePayloadType)) {
+                            std::string filePath(static_cast<const char*>(payload->Data));
+                            terrain->SetHeightmap(filePath);
+                            terrain->Generate();
+                        }
+                        ImGui::EndDragDropTarget();
+                    }
+
+                    ImGui::DragFloat("Size##terrain", &terrain->size, 0.5f, 1.0f, 2000.0f);
+                    ImGui::DragInt("Resolution##terrain", &terrain->resolution, 1.0f, 2, 1024);
+                    ImGui::DragFloat("Height Scale##terrain", &terrain->heightScale, 0.1f, 0.0f, 500.0f);
+
+                    if (ImGui::Button("Generate##terrain")) {
+                        terrain->Generate();
+                    }
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip("Rebuilds the terrain mesh from the heightmap + parameters.\nDrag a grayscale image from the Project browser onto Heightmap first.");
+                    }
+                    ImGui::Unindent();
+                }
+            }
+
             ImGui::Unindent();
         }
 
@@ -2190,85 +2306,134 @@ void DebugUI::DeleteNode(TNode* node, Scene* activeScene) {
     delete node;
 }
 
+bool DebugUI::DrawComponentItems(TNode* node, Scene* activeScene) {
+    if (!node) return false;
+    bool added = false;
+
+    // --- Rendering ---
+    if (!node->GetComponent<MeshComponent>() && ImGui::MenuItem("Mesh (Cube)")) {
+        std::vector<MeshVertex> vertices;
+        std::vector<uint32_t> indices;
+        GetDefaultCubeMesh(vertices, indices);
+        auto* mesh = node->AddComponent<MeshComponent>(vertices, indices);
+        if (!node->boundingBox) {
+            glm::vec3 localMin, localMax;
+            mesh->GetLocalBounds(localMin, localMax);
+            node->boundingBox = new AABB(localMin, localMax);
+        }
+        if (!node->GetComponent<MaterialComponent>()) {
+            node->AddComponent<MaterialComponent>(std::make_shared<Material>(ResourceManager::LoadShader("pbr")));
+        }
+        added = true;
+    }
+
+    if (!node->GetComponent<MaterialComponent>() && ImGui::MenuItem("Material")) {
+        node->AddComponent<MaterialComponent>(std::make_shared<Material>(ResourceManager::LoadShader("pbr")));
+        added = true;
+    }
+
+    if (!node->GetComponent<TerrainComponent>() && ImGui::MenuItem("Terrain")) {
+        node->AddComponent<TerrainComponent>(node);
+        added = true;
+    }
+
+    ImGui::Separator();
+
+    // --- Scene ---
+    if (!node->GetComponent<CameraComponent>() && ImGui::MenuItem("Camera")) {
+        node->AddComponent<CameraComponent>(node);
+        if (activeScene) activeScene->RegisterCamera(node);
+        added = true;
+    }
+
+    if (!node->GetComponent<LightComponent>() && ImGui::BeginMenu("Light")) {
+        if (ImGui::MenuItem("Directional")) {
+            node->AddComponent<LightComponent>(node, LightType::Directional);
+            if (activeScene) activeScene->RegisterLight(node);
+            added = true;
+        }
+        if (ImGui::MenuItem("Point")) {
+            node->AddComponent<LightComponent>(node, LightType::Point);
+            if (activeScene) activeScene->RegisterLight(node);
+            added = true;
+        }
+        if (ImGui::MenuItem("Spot")) {
+            node->AddComponent<LightComponent>(node, LightType::Spot);
+            if (activeScene) activeScene->RegisterLight(node);
+            added = true;
+        }
+        ImGui::EndMenu();
+    }
+
+    ImGui::Separator();
+
+    // --- VFX ---
+    if (!node->GetComponent<BillboardComponent>() && ImGui::MenuItem("Billboard")) {
+        node->AddComponent<BillboardComponent>();
+        added = true;
+    }
+
+    if (!node->GetComponent<GrassComponent>() && ImGui::MenuItem("Grass")) {
+        node->AddComponent<GrassComponent>();
+        added = true;
+    }
+
+    if (!node->GetComponent<ParticleSystemComponent>() && ImGui::MenuItem("Particle System")) {
+        auto* ps = node->AddComponent<ParticleSystemComponent>();
+        ps->ApplyPreset(ParticleSystemComponent::Preset::Fire);
+        if (activeScene) activeScene->RegisterAnimator(node);
+        added = true;
+    }
+
+    ImGui::Separator();
+
+    // --- Logic / animation ---
+    if (!node->GetComponent<AnimationComponent>() && ImGui::MenuItem("Animation")) {
+        node->AddComponent<AnimationComponent>(node);
+        if (activeScene) activeScene->RegisterAnimator(node);
+        added = true;
+    }
+
+    if (!node->GetComponent<PatrolComponent>() && ImGui::MenuItem("Patrol")) {
+        node->AddComponent<PatrolComponent>(node);
+        if (activeScene) activeScene->RegisterAnimator(node);
+        added = true;
+    }
+
+    if (!node->GetComponent<CameraPathComponent>() && ImGui::MenuItem("Camera Path")) {
+        node->AddComponent<CameraPathComponent>(node);
+        if (activeScene) activeScene->RegisterAnimator(node);
+        added = true;
+    }
+
+    return added;
+}
+
 void DebugUI::DrawAddComponentMenu(TNode* node, Scene* activeScene) {
     if (!node) return;
-
     if (ImGui::BeginMenu("Add Component")) {
-        if (!node->GetComponent<MeshComponent>() && ImGui::MenuItem("Mesh")) {
-            std::vector<MeshVertex> vertices;
-            std::vector<uint32_t> indices;
-            GetDefaultCubeMesh(vertices, indices);
-            auto* mesh = node->AddComponent<MeshComponent>(vertices, indices);
+        DrawComponentItems(node, activeScene);
+        ImGui::EndMenu();
+    }
+}
 
-            if (!node->boundingBox) {
-                glm::vec3 localMin, localMax;
-                mesh->GetLocalBounds(localMin, localMax);
-                node->boundingBox = new AABB(localMin, localMax);
-            }
-
-            if (!node->GetComponent<MaterialComponent>()) {
-                auto material = std::make_shared<Material>(ResourceManager::LoadShader("pbr"));
-                node->AddComponent<MaterialComponent>(material);
-            }
+void DebugUI::DrawCreateWithComponentMenu(TNode* parent, Scene* activeScene) {
+    if (!parent) return;
+    if (ImGui::BeginMenu("Create with Component")) {
+        // Run the shared component list against a detached scratch node. Only if
+        // an item is actually picked (DrawComponentItems returns true) do we
+        // parent + keep it -- so navigating the menu without picking creates
+        // nothing and never mutates the live tree. The RegisterCamera/Light/
+        // Animator calls inside DrawComponentItems just add the node to the
+        // scene's tracking lists (they don't require it to be in the tree yet),
+        // so registering here and parenting immediately after is consistent.
+        TNode* scratch = new TNode(nullptr, "Object");
+        if (DrawComponentItems(scratch, activeScene)) {
+            parent->addChild(scratch);
+            SelectNode(scratch);
+        } else {
+            delete scratch;
         }
-
-        if (!node->GetComponent<MaterialComponent>() && ImGui::MenuItem("Material")) {
-            auto material = std::make_shared<Material>(ResourceManager::LoadShader("pbr"));
-            node->AddComponent<MaterialComponent>(material);
-        }
-
-        if (!node->GetComponent<CameraComponent>() && ImGui::MenuItem("Camera")) {
-            node->AddComponent<CameraComponent>(node);
-            if (activeScene) {
-                activeScene->RegisterCamera(node);
-            }
-        }
-
-        if (!node->GetComponent<LightComponent>() && ImGui::BeginMenu("Light")) {
-            if (ImGui::MenuItem("Directional")) {
-                node->AddComponent<LightComponent>(node, LightType::Directional);
-                if (activeScene) activeScene->RegisterLight(node);
-            }
-            if (ImGui::MenuItem("Point")) {
-                node->AddComponent<LightComponent>(node, LightType::Point);
-                if (activeScene) activeScene->RegisterLight(node);
-            }
-            if (ImGui::MenuItem("Spot")) {
-                node->AddComponent<LightComponent>(node, LightType::Spot);
-                if (activeScene) activeScene->RegisterLight(node);
-            }
-            ImGui::EndMenu();
-        }
-
-        if (!node->GetComponent<AnimationComponent>() && ImGui::MenuItem("Animation")) {
-            node->AddComponent<AnimationComponent>(node);
-            if (activeScene) activeScene->RegisterAnimator(node);
-        }
-
-        if (!node->GetComponent<PatrolComponent>() && ImGui::MenuItem("Patrol")) {
-            node->AddComponent<PatrolComponent>(node);
-            if (activeScene) activeScene->RegisterAnimator(node);
-        }
-
-        if (!node->GetComponent<CameraPathComponent>() && ImGui::MenuItem("Camera Path")) {
-            node->AddComponent<CameraPathComponent>(node);
-            if (activeScene) activeScene->RegisterAnimator(node);
-        }
-
-        if (!node->GetComponent<BillboardComponent>() && ImGui::MenuItem("Billboard")) {
-            node->AddComponent<BillboardComponent>();
-        }
-
-        if (!node->GetComponent<GrassComponent>() && ImGui::MenuItem("Grass")) {
-            node->AddComponent<GrassComponent>();
-        }
-
-        if (!node->GetComponent<ParticleSystemComponent>() && ImGui::MenuItem("Particle System")) {
-            auto* ps = node->AddComponent<ParticleSystemComponent>();
-            ps->ApplyPreset(ParticleSystemComponent::Preset::Fire);
-            if (activeScene) activeScene->RegisterAnimator(node);
-        }
-
         ImGui::EndMenu();
     }
 }
@@ -2606,11 +2771,20 @@ void DebugUI::DrawCreateMenu(TNode* parent, Scene* activeScene) {
         node->transform.position = glm::vec3(parentInverse * glm::vec4(worldPos, 1.0f));
     };
 
-    if (ImGui::MenuItem("Cube")) {
-        TNode* node = SpawnCubeNode();
+    // Spawns a primitive node, places it at the spawn point, parents+selects it.
+    auto spawnPrimitive = [&](TNode* node) {
         placeAtSpawnPoint(node);
         parent->addChild(node);
         SelectNode(node);
+    };
+
+    if (ImGui::BeginMenu("3D Object")) {
+        if (ImGui::MenuItem("Cube"))     spawnPrimitive(SpawnCubeNode());
+        if (ImGui::MenuItem("Sphere"))   spawnPrimitive(SpawnSphereNode());
+        if (ImGui::MenuItem("Plane"))    spawnPrimitive(SpawnPlaneNode());
+        if (ImGui::MenuItem("Cylinder")) spawnPrimitive(SpawnCylinderNode());
+        if (ImGui::MenuItem("Cone"))     spawnPrimitive(SpawnConeNode());
+        ImGui::EndMenu();
     }
 
     if (ImGui::MenuItem("Camera")) {

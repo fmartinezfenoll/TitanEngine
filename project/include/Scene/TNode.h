@@ -244,7 +244,8 @@ public:
               const glm::vec3& cameraWorldPos, const std::vector<LightUniformData>& lights,
               const ShadowRenderData& shadowData, const IBLRenderData& iblData,
               std::vector<TransparentDrawItem>* outTransparent,
-              const glm::mat4& parentMatrix = glm::mat4(1.0f));
+              const glm::mat4& parentMatrix = glm::mat4(1.0f),
+              const FogSettings* fog = nullptr);
 
     void drawDepthOnly(OpenGLShader* depthShader, const glm::mat4& parentMatrix = glm::mat4(1.0f));
 

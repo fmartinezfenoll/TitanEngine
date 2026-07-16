@@ -14,6 +14,7 @@
 #include "Scene/BillboardComponent.h"
 #include "Scene/GrassComponent.h"
 #include "Scene/ParticleSystemComponent.h"
+#include "Scene/TerrainComponent.h"
 #include "ResourceManager/Texture.h"
 #include "ResourceManager/ResourceManager.h"
 #include "ResourceManager/Material.h"
@@ -116,7 +117,12 @@ BoundingVolume* DeserializeBoundingVolume(const json& j) {
 json SerializeComponents(const TNode* node) {
     json arr = json::array();
 
-    if (auto* mesh = node->GetComponent<MeshComponent>()) {
+    // A TerrainComponent regenerates its own MeshComponent from the heightmap on
+    // load, so skip serializing that (large) generated mesh -- just the terrain
+    // params below are enough to reproduce it.
+    bool hasTerrain = node->GetComponent<TerrainComponent>() != nullptr;
+
+    if (auto* mesh = node->GetComponent<MeshComponent>(); mesh && !hasTerrain) {
         json j;
         j["type"] = "mesh";
 
@@ -417,6 +423,16 @@ json SerializeComponents(const TNode* node) {
         j["endSize"] = ps->endSize;
         j["worldSpace"] = ps->worldSpace;
         j["playing"] = ps->playing;
+        arr.push_back(j);
+    }
+
+    if (auto* terrain = node->GetComponent<TerrainComponent>()) {
+        json j;
+        j["type"] = "terrain";
+        j["heightmap"] = terrain->GetHeightmapPath();
+        j["size"] = terrain->size;
+        j["resolution"] = terrain->resolution;
+        j["heightScale"] = terrain->heightScale;
         arr.push_back(j);
     }
 
@@ -767,6 +783,16 @@ void DeserializeComponents(TNode* node, Scene* scene, const json& j) {
                 scene->RegisterAnimator(node);
             }
         }
+        else if (type == "terrain") {
+            auto* terrain = node->AddComponent<TerrainComponent>(node);
+            terrain->SetHeightmap(compJson.value("heightmap", ""));
+            terrain->size = compJson.value("size", 50.0f);
+            terrain->resolution = compJson.value("resolution", 128);
+            terrain->heightScale = compJson.value("heightScale", 8.0f);
+            // Regenerate the mesh (it wasn't serialized). Works with or without a
+            // heightmap -- falls back to procedural terrain when none is set.
+            terrain->Generate();
+        }
     }
 }
 
@@ -919,6 +945,16 @@ bool SceneSerializer::SaveScene(Scene* scene, const std::string& filePath) {
         const glm::vec3& clearColor = scene->GetClearColor();
         j["clearColor"] = {clearColor.r, clearColor.g, clearColor.b};
 
+        const FogSettings& fog = scene->GetFog();
+        j["fog"] = {
+            {"enabled", fog.enabled},
+            {"mode", static_cast<int>(fog.mode)},
+            {"color", {fog.color.r, fog.color.g, fog.color.b}},
+            {"density", fog.density},
+            {"start", fog.start},
+            {"end", fog.end}
+        };
+
         if (Skybox* skybox = scene->GetSkybox()) {
             if (!skybox->GetName().empty()) {
                 j["skybox"] = skybox->GetName();
@@ -969,6 +1005,18 @@ Scene* SceneSerializer::LoadScene(const std::string& filePath) {
         if (j.contains("clearColor") && j["clearColor"].is_array()) {
             auto c = j["clearColor"];
             scene->SetClearColor(glm::vec3(c[0], c[1], c[2]));
+        }
+        if (j.contains("fog")) {
+            const auto& fj = j["fog"];
+            FogSettings& fog = scene->GetFog();
+            fog.enabled = fj.value("enabled", false);
+            fog.mode = static_cast<FogMode>(fj.value("mode", 2));
+            if (fj.contains("color") && fj["color"].is_array()) {
+                auto c = fj["color"]; fog.color = glm::vec3(c[0], c[1], c[2]);
+            }
+            fog.density = fj.value("density", 0.03f);
+            fog.start = fj.value("start", 10.0f);
+            fog.end = fj.value("end", 60.0f);
         }
         if (j.contains("skybox")) {
             std::string skyboxFolder = j["skybox"];
