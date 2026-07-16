@@ -1007,6 +1007,12 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
             if (ImGui::IsKeyPressed(ImGuiKey_R)) gizmoMode = GizmoMode::Scale;
             if (ImGui::IsKeyPressed(ImGuiKey_F)) FocusOnSelected(activeScene);
 
+            // H toggles the selected node's visibility (Blender convention).
+            if (ImGui::IsKeyPressed(ImGuiKey_H)) {
+                UndoManager::PushSnapshot(activeScene);
+                selectedNode->visible = !selectedNode->visible;
+            }
+
             if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D)) {
                 TNode* parent = selectedNode->parent;
                 if (parent) {
@@ -1791,6 +1797,7 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                 ImGui::Text("Mesh:");
                 ImGui::SameLine();
                 if (ImGui::SmallButton("Remove##mesh")) {
+                    UndoManager::PushSnapshot(activeScene);
                     selectedNode->RemoveComponent<MeshComponent>();
                 } else {
                     ImGui::Indent();
@@ -1806,6 +1813,7 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                 ImGui::Text("Material:");
                 ImGui::SameLine();
                 if (ImGui::SmallButton("Remove##material")) {
+                    UndoManager::PushSnapshot(activeScene);
                     selectedNode->RemoveComponent<MaterialComponent>();
                 } else {
                     ImGui::Indent();
@@ -1816,6 +1824,7 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                             if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(ProjectBrowser::kMaterialPayloadType)) {
                                 std::string filePath(static_cast<const char*>(payload->Data));
                                 if (auto loaded = MaterialSerializer::Load(filePath)) {
+                                    UndoManager::PushSnapshot(activeScene);
                                     materialComp->material = loaded;
                                 }
                             }
@@ -1841,6 +1850,7 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                 ImGui::Text("Camera:");
                 ImGui::SameLine();
                 if (ImGui::SmallButton("Remove##camera")) {
+                    UndoManager::PushSnapshot(activeScene);
                     if (activeScene) {
                         activeScene->UnregisterCamera(selectedNode);
                     }
@@ -2033,6 +2043,7 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                 ImGui::Text("Patrol:");
                 ImGui::SameLine();
                 if (ImGui::SmallButton("Remove##patrol")) {
+                    UndoManager::PushSnapshot(activeScene);
                     if (activeScene) {
                         bool stillAnimated = selectedNode->GetComponent<AnimationComponent>() != nullptr
                             || selectedNode->GetComponent<CameraPathComponent>() != nullptr;
@@ -2046,21 +2057,25 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                     if (ImGui::Checkbox("Active##patrol", &patrolActive)) {
                         patrol->SetActive(patrolActive);
                     }
+                    SnapshotOnEdit(activeScene);
 
                     float patrolSpeed = patrol->GetSpeed();
                     if (ImGui::DragFloat("Speed##patrol", &patrolSpeed, 0.05f, 0.0f, 50.0f)) {
                         patrol->SetSpeed(patrolSpeed);
                     }
+                    SnapshotOnEdit(activeScene);
 
                     float turnSpeed = patrol->GetTurnSpeed();
                     if (ImGui::DragFloat("Turn Speed##patrol", &turnSpeed, 1.0f, 0.0f, 720.0f)) {
                         patrol->SetTurnSpeed(turnSpeed);
                     }
+                    SnapshotOnEdit(activeScene);
 
                     float forwardOffset = patrol->GetForwardOffset();
                     if (ImGui::DragFloat("Forward Offset##patrol", &forwardOffset, 1.0f, -180.0f, 180.0f, "%.0f deg")) {
                         patrol->SetForwardOffset(forwardOffset);
                     }
+                    SnapshotOnEdit(activeScene);
                     if (ImGui::IsItemHovered()) {
                         ImGui::SetTooltip("If the character walks facing backward or sideways relative to\nits travel direction, adjust this (e.g. 180 to flip front/back).");
                     }
@@ -2069,6 +2084,7 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                         static_cast<int>(patrol->GetWaypoints().size()), patrol->IsPaused() ? "(paused)" : "");
 
                     if (ImGui::Button("Add Waypoint at Current Position##patrol")) {
+                        UndoManager::PushSnapshot(activeScene);
                         patrol->AddWaypoint(selectedNode->transform.position, 1.0f);
                     }
 
@@ -2080,8 +2096,10 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                         ImGui::PushID(static_cast<int>(i));
                         PatrolWaypoint& wp = waypoints[i];
                         ImGui::DragFloat3("Position##wp", &wp.position.x, 0.1f);
+                        SnapshotOnEdit(activeScene);
                         ImGui::SetNextItemWidth(80);
                         ImGui::DragFloat("Pause##wp", &wp.pauseSeconds, 0.05f, 0.0f, 60.0f);
+                        SnapshotOnEdit(activeScene);
                         ImGui::SameLine();
                         if (ImGui::SmallButton("Remove##wp")) {
                             removeIndex = static_cast<int>(i);
@@ -2089,6 +2107,7 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                         ImGui::PopID();
                     }
                     if (removeIndex >= 0) {
+                        UndoManager::PushSnapshot(activeScene);
                         patrol->RemoveWaypoint(static_cast<size_t>(removeIndex));
                     }
 
@@ -2101,6 +2120,7 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                 ImGui::Text("Camera Path:");
                 ImGui::SameLine();
                 if (ImGui::SmallButton("Remove##camerapath")) {
+                    UndoManager::PushSnapshot(activeScene);
                     if (activeScene) {
                         bool stillAnimated = selectedNode->GetComponent<AnimationComponent>() != nullptr
                             || selectedNode->GetComponent<PatrolComponent>() != nullptr;
@@ -2119,6 +2139,7 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                     if (ImGui::Checkbox("Loop##camerapath", &loop)) {
                         cameraPath->SetLooping(loop);
                     }
+                    SnapshotOnEdit(activeScene);
 
                     ImGui::SameLine();
                     if (cameraPath->IsPlaying()) {
@@ -2131,6 +2152,7 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                         static_cast<int>(cameraPath->GetPoints().size()));
 
                     if (ImGui::Button("Add Point at Current Position##camerapath")) {
+                        UndoManager::PushSnapshot(activeScene);
                         glm::vec3 lookAt = selectedNode->transform.position + glm::vec3(0.0f, 0.0f, -1.0f);
                         if (auto* camera = selectedNode->GetComponent<CameraComponent>()) {
                             lookAt = selectedNode->transform.position + camera->GetForward();
@@ -2168,18 +2190,23 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                         }
 
                         ImGui::DragFloat3("Position##camerapath", &point.position.x, 0.1f);
+                        SnapshotOnEdit(activeScene);
                         ImGui::DragFloat3("Look At##camerapath", &point.lookAt.x, 0.1f);
+                        SnapshotOnEdit(activeScene);
 
                         ImGui::SetNextItemWidth(90);
                         ImGui::DragFloat("Travel (s)##camerapath", &point.travelSeconds, 0.05f, 0.01f, 60.0f);
+                        SnapshotOnEdit(activeScene);
                         ImGui::SameLine();
                         ImGui::SetNextItemWidth(90);
                         ImGui::DragFloat("Hold (s)##camerapath", &point.holdSeconds, 0.05f, 0.0f, 60.0f);
+                        SnapshotOnEdit(activeScene);
 
                         ImGui::Separator();
                         ImGui::PopID();
                     }
                     if (removePointIndex >= 0) {
+                        UndoManager::PushSnapshot(activeScene);
                         cameraPath->RemovePoint(static_cast<size_t>(removePointIndex));
                     }
 
@@ -2217,13 +2244,17 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                 ImGui::Text("Billboard:");
                 ImGui::SameLine();
                 if (ImGui::SmallButton("Remove##billboard")) {
+                    UndoManager::PushSnapshot(activeScene);
                     selectedNode->RemoveComponent<BillboardComponent>();
                 } else {
                     ImGui::Indent();
                     vfxTextureSlot("Texture##billboard", billboard->texture, billboard->texturePath);
                     ImGui::DragFloat2("Size##billboard", &billboard->size.x, 0.05f, 0.01f, 100.0f);
+                    SnapshotOnEdit(activeScene);
                     ImGui::ColorEdit4("Tint##billboard", &billboard->tint.x);
+                    SnapshotOnEdit(activeScene);
                     ImGui::DragFloat("Alpha Cutoff##billboard", &billboard->alphaCutoff, 0.01f, 0.0f, 1.0f);
+                    SnapshotOnEdit(activeScene);
                     ImGui::Unindent();
                 }
             }
@@ -2233,6 +2264,7 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                 ImGui::Text("Grass:");
                 ImGui::SameLine();
                 if (ImGui::SmallButton("Remove##grass")) {
+                    UndoManager::PushSnapshot(activeScene);
                     selectedNode->RemoveComponent<GrassComponent>();
                 } else {
                     ImGui::Indent();
@@ -2240,17 +2272,25 @@ void DebugUI::DrawInspector(Scene* activeScene) {
 
                     bool needsRebuild = false;
                     needsRebuild |= ImGui::DragFloat2("Area Size##grass", &grass->areaSize.x, 0.5f, 1.0f, 500.0f);
+                    SnapshotOnEdit(activeScene);
                     needsRebuild |= ImGui::DragInt("Density##grass", &grass->density, 5.0f, 0, 20000);
+                    SnapshotOnEdit(activeScene);
                     int seedInt = static_cast<int>(grass->seed);
                     if (ImGui::DragInt("Seed##grass", &seedInt, 1.0f, 0, 1000000)) {
                         grass->seed = static_cast<unsigned int>(std::max(0, seedInt));
                         needsRebuild = true;
                     }
+                    SnapshotOnEdit(activeScene);
                     ImGui::DragFloat2("Blade Size##grass", &grass->bladeSize.x, 0.01f, 0.01f, 10.0f);
+                    SnapshotOnEdit(activeScene);
                     ImGui::ColorEdit3("Tint##grass", &grass->tint.x);
+                    SnapshotOnEdit(activeScene);
                     ImGui::DragFloat("Alpha Cutoff##grass", &grass->alphaCutoff, 0.01f, 0.0f, 1.0f);
+                    SnapshotOnEdit(activeScene);
                     ImGui::DragFloat("Wind Strength##grass", &grass->windStrength, 0.01f, 0.0f, 2.0f);
+                    SnapshotOnEdit(activeScene);
                     ImGui::DragFloat("Wind Speed##grass", &grass->windSpeed, 0.05f, 0.0f, 20.0f);
+                    SnapshotOnEdit(activeScene);
 
                     if (needsRebuild) grass->Rebuild();
                     if (ImGui::Button("Rebuild##grass")) grass->Rebuild();
@@ -2265,6 +2305,7 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                 ImGui::Text("Particle System:");
                 ImGui::SameLine();
                 if (ImGui::SmallButton("Remove##particles")) {
+                    UndoManager::PushSnapshot(activeScene);
                     if (activeScene) {
                         bool stillAnimated = selectedNode->GetComponent<AnimationComponent>() != nullptr
                             || selectedNode->GetComponent<PatrolComponent>() != nullptr
@@ -2279,6 +2320,7 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                     int presetIdx = static_cast<int>(particles->preset);
                     ImGui::SetNextItemWidth(140);
                     if (ImGui::Combo("Preset##particles", &presetIdx, presetLabels, IM_ARRAYSIZE(presetLabels))) {
+                        UndoManager::PushSnapshot(activeScene);
                         particles->ApplyPreset(static_cast<ParticleSystemComponent::Preset>(presetIdx));
                     }
 
@@ -2286,27 +2328,41 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                     int blendIdx = static_cast<int>(particles->blendMode);
                     ImGui::SetNextItemWidth(140);
                     if (ImGui::Combo("Blend##particles", &blendIdx, blendLabels, IM_ARRAYSIZE(blendLabels))) {
+                        UndoManager::PushSnapshot(activeScene);
                         particles->blendMode = static_cast<ParticleSystemComponent::BlendMode>(blendIdx);
                     }
 
                     ImGui::Checkbox("Playing##particles", &particles->playing);
+                    SnapshotOnEdit(activeScene);
                     ImGui::SameLine();
                     ImGui::TextDisabled("(%d live)", particles->GetLiveCount());
 
                     vfxTextureSlot("Texture##particles", particles->texture, particles->texturePath);
 
                     ImGui::DragInt("Max##particles", &particles->maxParticles, 5.0f, 1, 100000);
+                    SnapshotOnEdit(activeScene);
                     ImGui::DragFloat("Emit Rate##particles", &particles->emitRate, 1.0f, 0.0f, 5000.0f);
+                    SnapshotOnEdit(activeScene);
                     ImGui::DragFloat("Lifetime##particles", &particles->lifetime, 0.05f, 0.05f, 60.0f);
+                    SnapshotOnEdit(activeScene);
                     ImGui::DragFloat("Lifetime Spread##particles", &particles->lifetimeSpread, 0.02f, 0.0f, 10.0f);
+                    SnapshotOnEdit(activeScene);
                     ImGui::DragFloat3("Start Velocity##particles", &particles->startVelocity.x, 0.05f);
+                    SnapshotOnEdit(activeScene);
                     ImGui::DragFloat3("Velocity Spread##particles", &particles->velocitySpread.x, 0.05f, 0.0f, 20.0f);
+                    SnapshotOnEdit(activeScene);
                     ImGui::DragFloat3("Gravity##particles", &particles->gravity.x, 0.05f);
+                    SnapshotOnEdit(activeScene);
                     ImGui::DragFloat("Emit Radius##particles", &particles->emitRadius, 0.01f, 0.0f, 20.0f);
+                    SnapshotOnEdit(activeScene);
                     ImGui::ColorEdit4("Start Color##particles", &particles->startColor.x);
+                    SnapshotOnEdit(activeScene);
                     ImGui::ColorEdit4("End Color##particles", &particles->endColor.x);
+                    SnapshotOnEdit(activeScene);
                     ImGui::DragFloat("Start Size##particles", &particles->startSize, 0.01f, 0.0f, 20.0f);
+                    SnapshotOnEdit(activeScene);
                     ImGui::DragFloat("End Size##particles", &particles->endSize, 0.01f, 0.0f, 20.0f);
+                    SnapshotOnEdit(activeScene);
 
                     ImGui::Unindent();
                 }
@@ -2317,6 +2373,7 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                 ImGui::Text("Terrain:");
                 ImGui::SameLine();
                 if (ImGui::SmallButton("Remove##terrain")) {
+                    UndoManager::PushSnapshot(activeScene);
                     selectedNode->RemoveComponent<TerrainComponent>();
                 } else {
                     ImGui::Indent();
@@ -2329,6 +2386,7 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                     if (ImGui::BeginDragDropTarget()) {
                         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(ProjectBrowser::kTexturePayloadType)) {
                             std::string filePath(static_cast<const char*>(payload->Data));
+                            UndoManager::PushSnapshot(activeScene);
                             terrain->SetHeightmap(filePath);
                             terrain->Generate();
                         }
@@ -2336,10 +2394,14 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                     }
 
                     ImGui::DragFloat("Size##terrain", &terrain->size, 0.5f, 1.0f, 2000.0f);
+                    SnapshotOnEdit(activeScene);
                     ImGui::DragInt("Resolution##terrain", &terrain->resolution, 1.0f, 2, 1024);
+                    SnapshotOnEdit(activeScene);
                     ImGui::DragFloat("Height Scale##terrain", &terrain->heightScale, 0.1f, 0.0f, 500.0f);
+                    SnapshotOnEdit(activeScene);
 
                     if (ImGui::Button("Generate##terrain")) {
+                        UndoManager::PushSnapshot(activeScene);
                         terrain->Generate();
                     }
                     if (ImGui::IsItemHovered()) {
