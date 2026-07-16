@@ -41,6 +41,12 @@ public:
     static float GetDirectionalShadowBoxSize() { return directionalShadowBoxSize; }
     static void SetDirectionalShadowBoxSize(float size) { directionalShadowBoxSize = size; }
 
+    // When true, gizmo drags snap by default and holding Ctrl temporarily
+    // disables snapping (inverted from the normal "snap only while holding
+    // Ctrl" behavior) -- same toggle-then-invert pattern as Blender/Unity.
+    static bool IsAlwaysSnapEnabled() { return alwaysSnapEnabled; }
+    static void SetAlwaysSnapEnabled(bool enabled) { alwaysSnapEnabled = enabled; }
+
     // Gizmo snap increments applied while holding Ctrl during a drag.
     static float GetPositionSnap() { return positionSnap; }
     static void SetPositionSnap(float snap) { positionSnap = snap; }
@@ -73,6 +79,7 @@ private:
     static inline int shadowResolution2D = 2048;
     static inline int shadowResolutionCube = 1024;
     static inline float directionalShadowBoxSize = 150.0f;
+    static inline bool alwaysSnapEnabled = false;
     static inline float positionSnap = 0.5f;
     static inline float rotationSnapDegrees = 15.0f;
     static inline float scaleSnap = 0.1f;

@@ -165,6 +165,8 @@ json SerializeComponents(const TNode* node) {
             j["metallicFactor"] = mat->metallicFactor;
             j["roughnessFactor"] = mat->roughnessFactor;
             j["transparent"] = mat->transparent;
+            j["emissiveColor"] = {mat->emissiveColor.r, mat->emissiveColor.g, mat->emissiveColor.b};
+            j["emissiveIntensity"] = mat->emissiveIntensity;
 
             auto serializeTextureSlot = [&](const char* key, const std::shared_ptr<Texture>& tex) {
                 if (!tex) return;
@@ -508,6 +510,11 @@ void DeserializeComponents(TNode* node, Scene* scene, const json& j) {
             if (compJson.contains("metallicFactor")) material->metallicFactor = compJson["metallicFactor"];
             if (compJson.contains("roughnessFactor")) material->roughnessFactor = compJson["roughnessFactor"];
             if (compJson.contains("transparent")) material->transparent = compJson["transparent"];
+            if (compJson.contains("emissiveColor") && compJson["emissiveColor"].is_array()) {
+                auto c = compJson["emissiveColor"];
+                material->emissiveColor = glm::vec3(c[0], c[1], c[2]);
+            }
+            if (compJson.contains("emissiveIntensity")) material->emissiveIntensity = compJson["emissiveIntensity"];
 
             auto deserializeTextureSlot = [&](const char* key, std::shared_ptr<Texture>& slot) {
                 if (!compJson.contains(key)) return;

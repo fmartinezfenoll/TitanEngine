@@ -9,9 +9,12 @@ void SameLineOrWrap(float nextWidgetWidth, bool isFirstOnLine) {
     float avail = ImGui::GetContentRegionAvail().x;
     if (avail >= nextWidgetWidth) {
         ImGui::SameLine();
+    } else {
+        // Doesn't fit on the current line -- without an explicit NewLine(),
+        // the cursor stays at its residual X from the previous widget and the
+        // next one gets drawn clipped against the window's right edge.
+        ImGui::NewLine();
     }
-    // else: leave the cursor where it is (start of a new line) -- caller's
-    // next widget call naturally begins a fresh row.
 }
 
 }

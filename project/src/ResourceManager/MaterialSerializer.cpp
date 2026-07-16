@@ -20,6 +20,8 @@ bool MaterialSerializer::Save(const std::shared_ptr<Material>& material, const s
     j["metallicFactor"] = material->metallicFactor;
     j["roughnessFactor"] = material->roughnessFactor;
     j["transparent"] = material->transparent;
+    j["emissiveColor"] = {material->emissiveColor.r, material->emissiveColor.g, material->emissiveColor.b};
+    j["emissiveIntensity"] = material->emissiveIntensity;
 
     auto serializeTextureSlot = [&](const char* key, const std::shared_ptr<Texture>& tex) {
         if (!tex || tex->GetFilePath().empty()) return;
@@ -76,6 +78,11 @@ std::shared_ptr<Material> MaterialSerializer::Load(const std::string& filePath) 
     if (j.contains("metallicFactor")) material->metallicFactor = j["metallicFactor"];
     if (j.contains("roughnessFactor")) material->roughnessFactor = j["roughnessFactor"];
     if (j.contains("transparent")) material->transparent = j["transparent"];
+    if (j.contains("emissiveColor") && j["emissiveColor"].is_array()) {
+        auto c = j["emissiveColor"];
+        material->emissiveColor = glm::vec3(c[0], c[1], c[2]);
+    }
+    if (j.contains("emissiveIntensity")) material->emissiveIntensity = j["emissiveIntensity"];
 
     auto deserializeTextureSlot = [&](const char* key, std::shared_ptr<Texture>& slot) {
         if (!j.contains(key)) return;

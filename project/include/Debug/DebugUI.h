@@ -31,6 +31,11 @@ public:
     static ImFont* GetIconFont() { return iconFont; }
 
 private:
+    // Drag-drop payload carrying a raw TNode* (source and target both live in
+    // DrawSceneTree) -- lets the user re-parent a node by dragging its row onto
+    // another node's row.
+    static constexpr const char* kNodeDragPayloadType = "SCENE_NODE_PTR";
+
     static std::string DescribeNode(TNode* node);
     static void DrawSceneTree(TNode* node, Scene* activeScene, int depth = 0);
     static void DrawSceneSelector(SceneManager* sceneManager);
@@ -65,6 +70,9 @@ private:
     static void UpdateGizmoDrag(Scene* activeScene);
     static void SelectNode(TNode* node);
     static void FocusOnSelected(Scene* activeScene);
+    // Rotates the active camera (yaw/pitch only, no position change) to point
+    // at the selected node's world position -- "Look At" button in the Inspector.
+    static void LookAtSelected(Scene* activeScene);
     static void ToggleNodeInMultiSelect(TNode* node);
     static bool IsMultiSelected(TNode* node);
     static void DrawMultiDeleteConfirmation();

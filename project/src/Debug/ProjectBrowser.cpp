@@ -988,7 +988,12 @@ void ProjectBrowser::DrawDeleteConfirm(SceneManager* sceneManager) {
             ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", deleteError.c_str());
         }
 
-        if (ImGui::Button("Delete Forever", ImVec2(120, 0))) {
+        float buttonWidth = 120.0f;
+        float spacing = ImGui::GetStyle().ItemSpacing.x;
+        float totalWidth = (buttonWidth * 2) + spacing;
+        ImGui::SetCursorPosX(std::max(0.0f, (ImGui::GetWindowSize().x - totalWidth) * 0.5f));
+
+        if (ImGui::Button("Delete Forever", ImVec2(buttonWidth, 0))) {
             std::string err = DeleteOneAsset(deleteTarget, sceneManager);
             if (!err.empty()) {
                 deleteError = err;
@@ -999,7 +1004,7 @@ void ProjectBrowser::DrawDeleteConfirm(SceneManager* sceneManager) {
             }
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+        if (ImGui::Button("Cancel", ImVec2(buttonWidth, 0))) {
             showDeleteConfirm = false;
             deleteError.clear();
             ImGui::CloseCurrentPopup();
@@ -1024,7 +1029,12 @@ void ProjectBrowser::DrawMultiDeleteConfirm(SceneManager* sceneManager) {
             ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", deleteError.c_str());
         }
 
-        if (ImGui::Button("Delete Forever##multi", ImVec2(120, 0))) {
+        float buttonWidth = 120.0f;
+        float spacing = ImGui::GetStyle().ItemSpacing.x;
+        float totalWidth = (buttonWidth * 2) + spacing;
+        ImGui::SetCursorPosX(std::max(0.0f, (ImGui::GetWindowSize().x - totalWidth) * 0.5f));
+
+        if (ImGui::Button("Delete Forever##multi", ImVec2(buttonWidth, 0))) {
             std::vector<std::filesystem::path> toDelete = multiSelectedPaths;
             std::string lastError;
             for (const auto& target : toDelete) {
@@ -1038,7 +1048,7 @@ void ProjectBrowser::DrawMultiDeleteConfirm(SceneManager* sceneManager) {
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
-        if (ImGui::Button("Cancel##multi", ImVec2(120, 0))) {
+        if (ImGui::Button("Cancel##multi", ImVec2(buttonWidth, 0))) {
             showMultiDeleteConfirm = false;
             deleteError.clear();
             ImGui::CloseCurrentPopup();
@@ -1120,11 +1130,16 @@ void ProjectBrowser::DrawImportConflictPopup() {
             ImGui::CloseCurrentPopup();
         };
 
-        if (ImGui::Button("Overwrite", ImVec2(110, 0))) resolve(0);
+        float buttonWidth = 110.0f;
+        float spacing = ImGui::GetStyle().ItemSpacing.x;
+        float totalWidth = (buttonWidth * 3) + (spacing * 2);
+        ImGui::SetCursorPosX(std::max(0.0f, (ImGui::GetWindowSize().x - totalWidth) * 0.5f));
+
+        if (ImGui::Button("Overwrite", ImVec2(buttonWidth, 0))) resolve(0);
         ImGui::SameLine();
-        if (ImGui::Button("Keep Both", ImVec2(110, 0))) resolve(1);
+        if (ImGui::Button("Keep Both", ImVec2(buttonWidth, 0))) resolve(1);
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(110, 0))) resolve(2);
+        if (ImGui::Button("Cancel", ImVec2(buttonWidth, 0))) resolve(2);
 
         ImGui::EndPopup();
     }

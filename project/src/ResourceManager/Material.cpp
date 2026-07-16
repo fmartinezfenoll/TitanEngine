@@ -47,4 +47,7 @@ void Material::Bind() const
 
     shader->SetFloat("metallicFactor", metallicFactor);
     shader->SetFloat("roughnessFactor", roughnessFactor);
+
+    shader->SetVec3("emissiveColor", emissiveColor);
+    shader->SetFloat("emissiveIntensity", emissiveIntensity);
 }

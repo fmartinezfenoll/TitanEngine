@@ -48,6 +48,32 @@
 
 namespace {
 
+struct SceneStats {
+    int nodeCount = 0;
+    int meshCount = 0;
+    size_t vertexCount = 0;
+    size_t triangleCount = 0;
+};
+
+void AccumulateSceneStats(TNode* node, SceneStats& out) {
+    if (!node) return;
+    ++out.nodeCount;
+    if (auto* mesh = node->GetComponent<MeshComponent>()) {
+        ++out.meshCount;
+        out.vertexCount += mesh->GetVertexCount();
+        out.triangleCount += mesh->GetIndexCount() / 3;
+    }
+    for (TNode* child : node->children) {
+        AccumulateSceneStats(child, out);
+    }
+}
+
+SceneStats ComputeSceneStats(Scene* scene) {
+    SceneStats stats;
+    if (scene) AccumulateSceneStats(scene->GetRoot(), stats);
+    return stats;
+}
+
 void GetDefaultCubeMesh(std::vector<MeshVertex>& vertices, std::vector<uint32_t>& indices) {
     // 24 verts (4 per face, own normal/uv), 36 indices — standard "new mesh" cube.
     vertices = {
@@ -628,6 +654,27 @@ void DebugUI::FocusOnSelected(Scene* activeScene) {
     cameraNode->transform.position = center - camera->GetForward() * distance;
 }
 
+void DebugUI::LookAtSelected(Scene* activeScene) {
+    if (!selectedNode || !activeScene) return;
+
+    TNode* cameraNode = activeScene->GetMainCamera();
+    if (!cameraNode) return;
+    auto* camera = cameraNode->GetComponent<CameraComponent>();
+    if (!camera) return;
+
+    glm::vec3 target = selectedNode->getGlobalPosition();
+    if (auto* light = selectedNode->GetComponent<LightComponent>()) {
+        target = light->GetPosition();
+    }
+
+    glm::vec3 dir = target - cameraNode->getGlobalPosition();
+    if (glm::length(dir) < 1e-4f) return; // camera is already at the target
+    dir = glm::normalize(dir);
+
+    camera->yaw = glm::degrees(std::atan2(dir.z, dir.x));
+    camera->pitch = glm::degrees(std::asin(std::clamp(dir.y, -1.0f, 1.0f)));
+}
+
 namespace {
 
 glm::vec3 WorldAxisDirection(TNode* node, int axis) {
@@ -775,7 +822,7 @@ void DebugUI::UpdateGizmoDrag(Scene* activeScene) {
     TNode* node = dragNode;
     if (!node || !activeScene || activeHandle == GizmoHandle::None) return;
 
-    bool snap = ImGui::GetIO().KeyCtrl;
+    bool snap = EngineSettings::IsAlwaysSnapEnabled() ? !ImGui::GetIO().KeyCtrl : ImGui::GetIO().KeyCtrl;
 
     if (activeHandle == GizmoHandle::ScaleUniform) {
         ImVec2 mousePos = ImGui::GetIO().MousePos;
@@ -961,10 +1008,14 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
 
     ImGui::SetNextWindowPos(ImVec2(10, 720), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(260, 290), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSizeConstraints(ImVec2(220, 180), ImVec2(FLT_MAX, FLT_MAX));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(340, 220), ImVec2(FLT_MAX, FLT_MAX));
     if (ImGui::Begin("Stats", nullptr)) {
         ImGui::Text("FPS: %.1f", Stats::GetFPS());
         ImGui::Text("Draw calls: %d", Stats::GetDrawCalls());
+
+        SceneStats sceneStats = ComputeSceneStats(activeScene);
+        ImGui::Text("Nodes: %d  Meshes: %d", sceneStats.nodeCount, sceneStats.meshCount);
+        ImGui::Text("Vertices: %zu  Triangles: %zu", sceneStats.vertexCount, sceneStats.triangleCount);
         ImGui::Separator();
 
         bool vsyncEnabled = EngineSettings::IsVSyncEnabled();
@@ -1034,7 +1085,17 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
             EngineSettings::SetIBLEnabled(iblEnabled);
         }
 
-        if (ImGui::TreeNode("Gizmo Snap (Ctrl+Drag)")) {
+        if (ImGui::TreeNode("Gizmo Snap")) {
+            bool alwaysSnap = EngineSettings::IsAlwaysSnapEnabled();
+            if (ImGui::Checkbox("Always Snap", &alwaysSnap)) {
+                EngineSettings::SetAlwaysSnapEnabled(alwaysSnap);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip(alwaysSnap
+                    ? "Dragging snaps by default; hold Ctrl to move freely."
+                    : "Dragging moves freely by default; hold Ctrl to snap.");
+            }
+
             float posSnap = EngineSettings::GetPositionSnap();
             if (ImGui::DragFloat("Position", &posSnap, 0.05f, 0.01f, 100.0f)) {
                 EngineSettings::SetPositionSnap(posSnap);
@@ -1079,7 +1140,7 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
 
     ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(500, 700), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSizeConstraints(ImVec2(320, 260), ImVec2(FLT_MAX, FLT_MAX));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(520, 340), ImVec2(FLT_MAX, FLT_MAX));
 
     if (ImGui::Begin("Scene Debug", nullptr)) {
         // Scene Selector at top
@@ -1114,8 +1175,9 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
                     }
                 }
 
-                // Drop a .prefab from the Project Browser anywhere in this window to
-                // instantiate it as a child of the scene root.
+                // Drop a .prefab from the Project Browser, or a node dragged from
+                // elsewhere in the tree, anywhere in this window -- both re-parent
+                // to the scene root (top level).
                 if (ImGui::BeginDragDropTarget()) {
                     if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(ProjectBrowser::kPrefabPayloadType)) {
                         std::string filePath(static_cast<const char*>(payload->Data));
@@ -1124,6 +1186,12 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
                                 root->addChild(instance);
                                 SelectNode(instance);
                             }
+                        }
+                    }
+                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kNodeDragPayloadType)) {
+                        TNode* dragged = *static_cast<TNode**>(payload->Data);
+                        if (root && dragged && dragged != root) {
+                            root->addChild(dragged);
                         }
                     }
                     ImGui::EndDragDropTarget();
@@ -1164,7 +1232,7 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
 
     ImGui::SetNextWindowPos(ImVec2(10, 730), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(700, 320), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSizeConstraints(ImVec2(360, 240), ImVec2(FLT_MAX, FLT_MAX));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(580, 340), ImVec2(FLT_MAX, FLT_MAX));
     if (ImGui::Begin("Project", nullptr)) {
         ProjectBrowser::Draw(sceneManager, activeScene);
     }
@@ -1280,13 +1348,32 @@ void DebugUI::DrawSceneTree(TNode* node, Scene* activeScene, int depth) {
         }
     }
 
-    // Drop a .prefab onto this node's row to instantiate it as a child of this node.
+    // Drag this node's row to re-parent it elsewhere in the tree.
+    if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
+        ImGui::SetDragDropPayload(kNodeDragPayloadType, &node, sizeof(TNode*));
+        ImGui::Text("%s", label.c_str());
+        ImGui::EndDragDropSource();
+    }
+
+    // Drop a .prefab, or another node from this tree, onto this node's row.
     if (ImGui::BeginDragDropTarget()) {
         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(ProjectBrowser::kPrefabPayloadType)) {
             std::string filePath(static_cast<const char*>(payload->Data));
             if (TNode* instance = PrefabSerializer::Instantiate(filePath, activeScene)) {
                 node->addChild(instance);
                 SelectNode(instance);
+            }
+        }
+        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kNodeDragPayloadType)) {
+            TNode* dragged = *static_cast<TNode**>(payload->Data);
+            // Refuse no-op (dropping onto itself) and cycles (dropping onto one
+            // of its own descendants, which would detach the subtree it's in).
+            bool isDescendant = false;
+            for (TNode* ancestor = node; ancestor; ancestor = ancestor->parent) {
+                if (ancestor == dragged) { isDescendant = true; break; }
+            }
+            if (dragged && dragged != node && !isDescendant) {
+                node->addChild(dragged); // addChild already detaches from its old parent
             }
         }
         ImGui::EndDragDropTarget();
@@ -1428,7 +1515,7 @@ void DebugUI::DrawInspector(Scene* activeScene) {
 
     ImGui::SetNextWindowPos(ImVec2(520, 10), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(400, 700), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSizeConstraints(ImVec2(300, 260), ImVec2(FLT_MAX, FLT_MAX));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(440, 340), ImVec2(FLT_MAX, FLT_MAX));
 
     if (!inspectingMaterialPath.empty()) {
         if (ImGui::Begin("Inspector", nullptr)) {
@@ -1517,7 +1604,9 @@ void DebugUI::DrawInspector(Scene* activeScene) {
             if (ImGui::RadioButton("Local", gizmoSpace == GizmoSpace::Local)) gizmoSpace = GizmoSpace::Local;
 
             ImGui::Spacing();
-            ImGui::TextDisabled("Hold Ctrl while dragging to snap");
+            ImGui::TextDisabled(EngineSettings::IsAlwaysSnapEnabled()
+                ? "Always Snap is on -- hold Ctrl while dragging to move freely"
+                : "Hold Ctrl while dragging to snap");
 
             ImGui::Unindent();
         }
@@ -1592,6 +1681,21 @@ void DebugUI::DrawInspector(Scene* activeScene) {
                 if (ImGui::IsItemHovered()) {
                     ImGui::SetTooltip("Moves this node's origin to the center of its mesh bounds,\nwithout visually moving the geometry.");
                 }
+            }
+
+            ImGui::Spacing();
+            if (ImGui::SmallButton("Focus (F)")) {
+                FocusOnSelected(activeScene);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Moves the active camera toward this object,\nkeeping its current facing direction.");
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Look At")) {
+                LookAtSelected(activeScene);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Rotates the active camera in place to face this object,\nwithout moving it.");
             }
 
             ImGui::Spacing();
@@ -2473,6 +2577,9 @@ void DebugUI::DrawMaterialFields(const std::shared_ptr<Material>& mat, const std
     changed |= ImGui::SliderFloat("Metallic##material", &mat->metallicFactor, 0.0f, 1.0f);
     changed |= ImGui::SliderFloat("Roughness##material", &mat->roughnessFactor, 0.0f, 1.0f);
     changed |= ImGui::Checkbox("Transparent##material", &mat->transparent);
+
+    changed |= ImGui::ColorEdit3("Emissive Color##material", &mat->emissiveColor.x);
+    changed |= ImGui::DragFloat("Emissive Intensity##material", &mat->emissiveIntensity, 0.05f, 0.0f, 50.0f);
 
     if (changed && assetPath) {
         MaterialSerializer::Save(mat, *assetPath);

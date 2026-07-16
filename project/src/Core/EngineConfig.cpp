@@ -83,6 +83,10 @@ void EngineConfig::Load(const std::string& path)
     if (it != values.end())
         EngineSettings::SetDirectionalShadowBoxSize(std::stof(it->second));
 
+    it = values.find("AlwaysSnap");
+    if (it != values.end())
+        EngineSettings::SetAlwaysSnapEnabled(ToBool(it->second, EngineSettings::IsAlwaysSnapEnabled()));
+
     it = values.find("PositionSnap");
     if (it != values.end())
         EngineSettings::SetPositionSnap(std::stof(it->second));
@@ -128,6 +132,7 @@ void EngineConfig::Save(const std::string& path)
     file << "ShadowResolution2D=" << EngineSettings::GetShadowResolution2D() << "\n";
     file << "ShadowResolutionCube=" << EngineSettings::GetShadowResolutionCube() << "\n";
     file << "DirectionalShadowBoxSize=" << EngineSettings::GetDirectionalShadowBoxSize() << "\n";
+    file << "AlwaysSnap=" << (EngineSettings::IsAlwaysSnapEnabled() ? 1 : 0) << "\n";
     file << "PositionSnap=" << EngineSettings::GetPositionSnap() << "\n";
     file << "RotationSnapDegrees=" << EngineSettings::GetRotationSnapDegrees() << "\n";
     file << "ScaleSnap=" << EngineSettings::GetScaleSnap() << "\n";

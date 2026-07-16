@@ -16,6 +16,11 @@ uniform float metallicFactor;
 uniform float roughnessFactor;
 uniform vec3 cameraWorldPos;
 
+// Added unconditionally to the lit result, independent of scene lighting --
+// lets a surface glow (signs, lava, eyes) even with zero lights.
+uniform vec3 emissiveColor;
+uniform float emissiveIntensity;
+
 uniform bool hasIBL;
 uniform samplerCube irradianceMap;
 uniform samplerCube prefilterMap;
@@ -273,6 +278,8 @@ void main()
     vec3 result = (lightCount > 0)
         ? ambient + lighting
         : albedo * (max(dot(normal, normalize(vec3(0.4, 0.8, 0.6))), 0.0) * 0.7 + 0.3);
+
+    result += emissiveColor * emissiveIntensity;
 
     if (fogEnabled)
     {
