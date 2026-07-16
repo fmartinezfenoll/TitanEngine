@@ -31,7 +31,7 @@ public:
               const glm::mat4& view, const glm::mat4& projection, const glm::vec3& cameraWorldPos,
               const std::vector<LightUniformData>& lights,
               const ShadowRenderData& shadowData, const IBLRenderData& iblData,
-              SkinComponent* skin = nullptr, const FogSettings* fog = nullptr) const;
+              SkinComponent* skin = nullptr, const FogSettings* fog = nullptr, float time = 0.0f) const;
 
     void DrawDepthOnly(const glm::mat4& modelMatrix, OpenGLShader* depthShader) const;
 

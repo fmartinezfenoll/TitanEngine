@@ -42,7 +42,7 @@ void TNode::draw(const Frustum& frustum, const glm::mat4& view, const glm::mat4&
                  const glm::vec3& cameraWorldPos, const std::vector<LightUniformData>& lights,
                  const ShadowRenderData& shadowData, const IBLRenderData& iblData,
                  std::vector<TransparentDrawItem>* outTransparent, const glm::mat4& parentMatrix,
-                 const FogSettings* fog) {
+                 const FogSettings* fog, float time) {
     glm::mat4 modelMatrix = parentMatrix * transform.getModelMatrix();
 
     bool passesCulling = !EngineSettings::IsFrustumCullingEnabled()
@@ -68,14 +68,14 @@ void TNode::draw(const Frustum& frustum, const glm::mat4& view, const glm::mat4&
                     outTransparent->push_back({this, modelMatrix});
                 } else {
                     mesh->Draw(modelMatrix, materialComp, view, projection, cameraWorldPos, lights, shadowData, iblData,
-                               GetComponent<SkinComponent>(), fog);
+                               GetComponent<SkinComponent>(), fog, time);
                 }
             }
         }
 
         for (TNode* child : children) {
             if (child) {
-                child->draw(frustum, view, projection, cameraWorldPos, lights, shadowData, iblData, outTransparent, modelMatrix, fog);
+                child->draw(frustum, view, projection, cameraWorldPos, lights, shadowData, iblData, outTransparent, modelMatrix, fog, time);
             }
         }
     }

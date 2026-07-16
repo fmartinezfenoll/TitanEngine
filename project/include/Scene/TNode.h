@@ -245,7 +245,7 @@ public:
               const ShadowRenderData& shadowData, const IBLRenderData& iblData,
               std::vector<TransparentDrawItem>* outTransparent,
               const glm::mat4& parentMatrix = glm::mat4(1.0f),
-              const FogSettings* fog = nullptr);
+              const FogSettings* fog = nullptr, float time = 0.0f);
 
     void drawDepthOnly(OpenGLShader* depthShader, const glm::mat4& parentMatrix = glm::mat4(1.0f));
 

@@ -133,7 +133,7 @@ void MeshComponent::Draw(const glm::mat4& modelMatrix, MaterialComponent* materi
                          const glm::mat4& view, const glm::mat4& projection, const glm::vec3& cameraWorldPos,
                          const std::vector<LightUniformData>& lights,
                          const ShadowRenderData& shadowData, const IBLRenderData& iblData,
-                         SkinComponent* skin, const FogSettings* fog) const {
+                         SkinComponent* skin, const FogSettings* fog, float time) const {
     if (!material || !material->material) return;
 
     auto shader = material->material->GetShader();
@@ -144,6 +144,9 @@ void MeshComponent::Draw(const glm::mat4& modelMatrix, MaterialComponent* materi
     shader->SetMat4("view", view);
     shader->SetMat4("model", modelMatrix);
     shader->SetVec3("cameraWorldPos", cameraWorldPos);
+    // Animated shaders (water/hologram/etc.) read this; ordinary shaders that
+    // don't declare a `time` uniform simply ignore it (no-op set).
+    shader->SetFloat("time", time);
 
     if (SkinnedMesh) {
         // Always upload joint matrices for a skinned mesh, even when there's no

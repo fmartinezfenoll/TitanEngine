@@ -25,6 +25,7 @@
 #include "Scene/GrassComponent.h"
 #include "Scene/ParticleSystemComponent.h"
 #include "Scene/TerrainComponent.h"
+#include "Scene/MeshPrimitives.h"
 #include "Renderer/Skybox.h"
 #include "Core/EngineSettings.h"
 #include "Core/Log.h"
@@ -94,6 +95,108 @@ TNode* BuildGroundPlaneNode(float size) {
     glm::vec3 localMin, localMax;
     mesh->GetLocalBounds(localMin, localMax);
     node->boundingBox = new AABB(localMin, localMax);
+    return node;
+}
+
+// Builds a node with the given geometry, a material using `shaderName`, and a
+// base color. Used by the shader-showcase demo scenes below.
+TNode* BuildShadedNode(const std::string& name, const std::string& shaderName,
+                       const std::vector<MeshVertex>& vertices, const std::vector<uint32_t>& indices,
+                       const glm::vec4& color, bool transparent = false) {
+    auto material = std::make_shared<Material>(ResourceManager::LoadShader(shaderName));
+    material->baseColor = color;
+    material->transparent = transparent;
+
+    TNode* node = new TNode(nullptr, name);
+    auto* mesh = node->AddComponent<MeshComponent>(vertices, indices);
+    node->AddComponent<MaterialComponent>(material);
+
+    glm::vec3 localMin, localMax;
+    mesh->GetLocalBounds(localMin, localMax);
+    node->boundingBox = new AABB(localMin, localMax);
+    return node;
+}
+
+// A ground plane using an arbitrary shader (mirrors BuildGroundPlaneNode but
+// lets the showcase scenes ground their objects in the same shader style).
+TNode* BuildShadedGround(const std::string& shaderName, float size, const glm::vec4& color) {
+    std::vector<MeshVertex> vertices;
+    std::vector<uint32_t> indices;
+    MeshPrimitives::Plane(vertices, indices, size, 1);
+    return BuildShadedNode("Ground", shaderName, vertices, indices, color);
+}
+
+// A varied arrangement of primitives (spheres, cylinders, cones, a big back
+// sphere) all using `shaderName` -- shows a shading style across curved and
+// faceted surfaces at different scales and positions so lighting reads well.
+void AddPrimitiveShowcase(Scene* scene, const std::string& shaderName) {
+    std::vector<MeshVertex> v;
+    std::vector<uint32_t> idx;
+
+    // Front row: sphere, cylinder, cone.
+    MeshPrimitives::Sphere(v, idx, 1.2f, 32, 24);
+    TNode* sphere = BuildShadedNode("Sphere", shaderName, v, idx, glm::vec4(0.85f, 0.35f, 0.35f, 1.0f));
+    sphere->transform.position = glm::vec3(-3.0f, 1.2f, 0.0f);
+    scene->AddNodeToRoot(sphere);
+
+    v.clear(); idx.clear();
+    MeshPrimitives::Cylinder(v, idx, 1.0f, 2.4f, 32);
+    TNode* cylinder = BuildShadedNode("Cylinder", shaderName, v, idx, glm::vec4(0.4f, 0.7f, 0.45f, 1.0f));
+    cylinder->transform.position = glm::vec3(0.0f, 1.2f, 0.0f);
+    scene->AddNodeToRoot(cylinder);
+
+    v.clear(); idx.clear();
+    MeshPrimitives::Cone(v, idx, 1.1f, 2.4f, 32);
+    TNode* cone = BuildShadedNode("Cone", shaderName, v, idx, glm::vec4(0.45f, 0.55f, 0.9f, 1.0f));
+    cone->transform.position = glm::vec3(3.0f, 1.2f, 0.0f);
+    scene->AddNodeToRoot(cone);
+
+    // A large sphere behind the row -- a big smooth surface makes the lighting
+    // gradients (toon bands / dither) very readable.
+    v.clear(); idx.clear();
+    MeshPrimitives::Sphere(v, idx, 2.6f, 48, 36);
+    TNode* bigSphere = BuildShadedNode("Big Sphere", shaderName, v, idx, glm::vec4(0.75f, 0.72f, 0.68f, 1.0f));
+    bigSphere->transform.position = glm::vec3(-1.0f, 2.6f, -6.0f);
+    scene->AddNodeToRoot(bigSphere);
+
+    // Two small spheres flanking, catching the colored point lights.
+    v.clear(); idx.clear();
+    MeshPrimitives::Sphere(v, idx, 0.8f, 24, 18);
+    TNode* smallLeft = BuildShadedNode("Small Sphere L", shaderName, v, idx, glm::vec4(0.8f, 0.8f, 0.85f, 1.0f));
+    smallLeft->transform.position = glm::vec3(-6.0f, 0.8f, -2.0f);
+    scene->AddNodeToRoot(smallLeft);
+
+    v.clear(); idx.clear();
+    MeshPrimitives::Sphere(v, idx, 0.8f, 24, 18);
+    TNode* smallRight = BuildShadedNode("Small Sphere R", shaderName, v, idx, glm::vec4(0.8f, 0.8f, 0.85f, 1.0f));
+    smallRight->transform.position = glm::vec3(6.0f, 0.8f, -2.0f);
+    scene->AddNodeToRoot(smallRight);
+
+    // A couple of tall pillars for vertical variety and cast-shadow-like banding.
+    v.clear(); idx.clear();
+    MeshPrimitives::Cylinder(v, idx, 0.5f, 5.0f, 24);
+    TNode* pillarL = BuildShadedNode("Pillar L", shaderName, v, idx, glm::vec4(0.6f, 0.6f, 0.65f, 1.0f));
+    pillarL->transform.position = glm::vec3(-8.0f, 2.5f, -5.0f);
+    scene->AddNodeToRoot(pillarL);
+
+    v.clear(); idx.clear();
+    MeshPrimitives::Cylinder(v, idx, 0.5f, 5.0f, 24);
+    TNode* pillarR = BuildShadedNode("Pillar R", shaderName, v, idx, glm::vec4(0.6f, 0.6f, 0.65f, 1.0f));
+    pillarR->transform.position = glm::vec3(8.0f, 2.5f, -5.0f);
+    scene->AddNodeToRoot(pillarR);
+}
+
+// Adds a colored point light to `scene` at a position, with a given color,
+// intensity and range. Returns the node so callers can tweak it further.
+TNode* AddPointLight(Scene* scene, const std::string& name, const glm::vec3& pos,
+                     const glm::vec3& color, float intensity, float range) {
+    TNode* node = new TNode(nullptr, name);
+    auto* light = node->AddComponent<LightComponent>(node, LightType::Point);
+    light->color = color;
+    light->intensity = intensity;
+    light->range = range;
+    node->transform.position = pos;
+    scene->AddNodeToRoot(node);
     return node;
 }
 
@@ -345,6 +448,216 @@ void Application::SetupScenes()
         cam->farPlane = 500.0f;
         terrainScene->AddNodeToRoot(terrainCamera);
         terrainScene->SetMainCamera(terrainCamera);
+    }
+
+    if (!sm.GetScene("Cartoon Test")) {
+        Scene* cartoonScene = sm.CreateScene("Cartoon Test");
+        cartoonScene->SetClearColor(glm::vec3(0.55f, 0.75f, 0.9f));
+
+        cartoonScene->AddNodeToRoot(BuildShadedGround("cartoon", 60.0f, glm::vec4(0.5f, 0.8f, 0.5f, 1.0f)));
+        AddPrimitiveShowcase(cartoonScene, "cartoon");
+
+        // Key light: a warm sun giving the main toon bands their direction.
+        TNode* sunNode = new TNode(nullptr, "Sun");
+        auto* sun = sunNode->AddComponent<LightComponent>(sunNode, LightType::Directional);
+        sun->intensity = 2.2f;
+        sun->color = glm::vec3(1.0f, 0.95f, 0.85f);
+        sunNode->transform.rotation = glm::vec3(-45.0f, -35.0f, 0.0f);
+        cartoonScene->AddNodeToRoot(sunNode);
+
+        // Colored point lights from different sides -- with cel-shading these
+        // paint clearly separated colored bands across the surfaces.
+        AddPointLight(cartoonScene, "Red Light",     glm::vec3(-7.0f, 3.0f,  4.0f), glm::vec3(1.0f, 0.25f, 0.2f),  4.0f, 22.0f);
+        AddPointLight(cartoonScene, "Cyan Light",    glm::vec3( 7.0f, 3.0f,  4.0f), glm::vec3(0.2f, 0.7f, 1.0f),   4.0f, 22.0f);
+        AddPointLight(cartoonScene, "Magenta Light", glm::vec3( 0.0f, 5.0f, -8.0f), glm::vec3(0.9f, 0.3f, 0.9f),   4.0f, 26.0f);
+
+        TNode* cartoonCamera = new TNode(nullptr, "MainCamera");
+        CameraComponent* cam = cartoonCamera->AddComponent<CameraComponent>(cartoonCamera);
+        cartoonCamera->transform.position = glm::vec3(0.0f, 4.0f, 12.0f);
+        cam->pitch = -16.0f;
+        cartoonScene->AddNodeToRoot(cartoonCamera);
+        cartoonScene->SetMainCamera(cartoonCamera);
+    }
+
+    if (!sm.GetScene("Retro Test")) {
+        Scene* retroScene = sm.CreateScene("Retro Test");
+        // Obra-Dinn-style 1-bit dithering: the shader outputs only black/white,
+        // so the clear color barely matters, but keep it dark for framing.
+        retroScene->SetClearColor(glm::vec3(0.05f, 0.05f, 0.06f));
+        retroScene->SetGridVisible(false);
+
+        retroScene->AddNodeToRoot(BuildShadedGround("retro", 60.0f, glm::vec4(0.6f, 0.6f, 0.6f, 1.0f)));
+        AddPrimitiveShowcase(retroScene, "retro");
+
+        // The retro shader keys off luminance (not light color), so what matters
+        // here is having light coming from several directions: each creates its
+        // own patch of white dots on a surface, and the dark shader keeps
+        // everything else in ink. A soft key + point lights near the objects
+        // carve out readable lit regions against the black.
+        TNode* sunNode = new TNode(nullptr, "Sun");
+        auto* sun = sunNode->AddComponent<LightComponent>(sunNode, LightType::Directional);
+        sun->intensity = 1.6f;
+        sunNode->transform.rotation = glm::vec3(-45.0f, -35.0f, 0.0f);
+        retroScene->AddNodeToRoot(sunNode);
+
+        // Point lights hugging the objects -- these are what make the shapes
+        // "emerge" from the darkness as bright dithered highlights.
+        AddPointLight(retroScene, "Key Point",   glm::vec3(-4.0f, 4.0f,  5.0f), glm::vec3(1.0f), 6.0f, 24.0f);
+        AddPointLight(retroScene, "Side Point",  glm::vec3( 6.0f, 3.0f,  1.0f), glm::vec3(1.0f), 5.0f, 20.0f);
+        AddPointLight(retroScene, "Back Point",  glm::vec3( 0.0f, 5.0f, -7.0f), glm::vec3(1.0f), 6.0f, 26.0f);
+
+        TNode* retroCamera = new TNode(nullptr, "MainCamera");
+        CameraComponent* cam = retroCamera->AddComponent<CameraComponent>(retroCamera);
+        retroCamera->transform.position = glm::vec3(0.0f, 4.0f, 12.0f);
+        cam->pitch = -16.0f;
+        retroScene->AddNodeToRoot(retroCamera);
+        retroScene->SetMainCamera(retroCamera);
+    }
+
+    if (!sm.GetScene("Water Test")) {
+        Scene* waterScene = sm.CreateScene("Water Test");
+        waterScene->SetClearColor(glm::vec3(0.1f, 0.15f, 0.2f));
+
+        // A big subdivided plane IS the water surface -- the shader ripples its
+        // normal procedurally over time (the mesh stays flat). Transparent so it
+        // reads as liquid. Blue tint = water; change baseColor for toxic/lava.
+        std::vector<MeshVertex> v;
+        std::vector<uint32_t> idx;
+        MeshPrimitives::Plane(v, idx, 40.0f, 1);
+        TNode* water = BuildShadedNode("Water Surface", "water", v, idx, glm::vec4(0.1f, 0.5f, 0.8f, 0.85f), /*transparent=*/true);
+        water->transform.position = glm::vec3(0.0f, 0.5f, 0.0f);
+        waterScene->AddNodeToRoot(water);
+
+        // A few opaque (pbr) objects half-submerged, so the water has something
+        // to sit around and reflect light near.
+        v.clear(); idx.clear();
+        MeshPrimitives::Sphere(v, idx, 2.0f, 32, 24);
+        TNode* rock = BuildShadedNode("Rock", "pbr", v, idx, glm::vec4(0.35f, 0.3f, 0.28f, 1.0f));
+        rock->transform.position = glm::vec3(-4.0f, 0.5f, -2.0f);
+        waterScene->AddNodeToRoot(rock);
+
+        TNode* sunNode = new TNode(nullptr, "Sun");
+        auto* sun = sunNode->AddComponent<LightComponent>(sunNode, LightType::Directional);
+        sun->intensity = 2.5f;
+        sun->color = glm::vec3(1.0f, 0.97f, 0.9f);
+        sunNode->transform.rotation = glm::vec3(-55.0f, -25.0f, 0.0f);
+        waterScene->AddNodeToRoot(sunNode);
+        AddPointLight(waterScene, "Glow", glm::vec3(3.0f, 3.0f, 3.0f), glm::vec3(0.4f, 0.8f, 1.0f), 4.0f, 20.0f);
+
+        TNode* waterCamera = new TNode(nullptr, "MainCamera");
+        CameraComponent* cam = waterCamera->AddComponent<CameraComponent>(waterCamera);
+        waterCamera->transform.position = glm::vec3(0.0f, 6.0f, 16.0f);
+        cam->pitch = -22.0f;
+        waterScene->AddNodeToRoot(waterCamera);
+        waterScene->SetMainCamera(waterCamera);
+    }
+
+    if (!sm.GetScene("Hologram Test")) {
+        Scene* holoScene = sm.CreateScene("Hologram Test");
+        holoScene->SetClearColor(glm::vec3(0.03f, 0.04f, 0.06f)); // dark so the glow pops
+        holoScene->SetGridVisible(false);
+
+        // Transparent hologram primitives in a row (cyan projection look).
+        std::vector<MeshVertex> v;
+        std::vector<uint32_t> idx;
+        glm::vec4 cyan(0.3f, 0.9f, 1.0f, 1.0f);
+
+        MeshPrimitives::Sphere(v, idx, 1.4f, 32, 24);
+        TNode* holoSphere = BuildShadedNode("Holo Sphere", "hologram", v, idx, cyan, /*transparent=*/true);
+        holoSphere->transform.position = glm::vec3(-3.5f, 1.6f, 0.0f);
+        holoScene->AddNodeToRoot(holoSphere);
+
+        v.clear(); idx.clear();
+        MeshPrimitives::Cone(v, idx, 1.2f, 2.8f, 32);
+        TNode* holoCone = BuildShadedNode("Holo Cone", "hologram", v, idx, cyan, /*transparent=*/true);
+        holoCone->transform.position = glm::vec3(0.0f, 1.6f, 0.0f);
+        holoScene->AddNodeToRoot(holoCone);
+
+        v.clear(); idx.clear();
+        MeshPrimitives::Cylinder(v, idx, 1.0f, 2.8f, 32);
+        TNode* holoCyl = BuildShadedNode("Holo Cylinder", "hologram", v, idx, cyan, /*transparent=*/true);
+        holoCyl->transform.position = glm::vec3(3.5f, 1.6f, 0.0f);
+        holoScene->AddNodeToRoot(holoCyl);
+
+        TNode* holoCamera = new TNode(nullptr, "MainCamera");
+        CameraComponent* cam = holoCamera->AddComponent<CameraComponent>(holoCamera);
+        holoCamera->transform.position = glm::vec3(0.0f, 3.0f, 9.0f);
+        cam->pitch = -12.0f;
+        holoScene->AddNodeToRoot(holoCamera);
+        holoScene->SetMainCamera(holoCamera);
+    }
+
+    if (!sm.GetScene("Iridescent Test")) {
+        Scene* iriScene = sm.CreateScene("Iridescent Test");
+        iriScene->SetClearColor(glm::vec3(0.06f, 0.06f, 0.08f));
+
+        iriScene->AddNodeToRoot(BuildShadedGround("pbr", 40.0f, glm::vec4(0.15f, 0.15f, 0.18f, 1.0f)));
+        // Iridescent gems: the hue shifts with view angle, so orbit the camera
+        // or rotate them to see the rainbow move.
+        AddPrimitiveShowcase(iriScene, "iridescent");
+
+        TNode* sunNode = new TNode(nullptr, "Sun");
+        auto* sun = sunNode->AddComponent<LightComponent>(sunNode, LightType::Directional);
+        sun->intensity = 2.0f;
+        sunNode->transform.rotation = glm::vec3(-45.0f, -35.0f, 0.0f);
+        iriScene->AddNodeToRoot(sunNode);
+        AddPointLight(iriScene, "Sparkle", glm::vec3(0.0f, 5.0f, 5.0f), glm::vec3(1.0f), 4.0f, 24.0f);
+
+        TNode* iriCamera = new TNode(nullptr, "MainCamera");
+        CameraComponent* cam = iriCamera->AddComponent<CameraComponent>(iriCamera);
+        iriCamera->transform.position = glm::vec3(0.0f, 4.0f, 12.0f);
+        cam->pitch = -16.0f;
+        iriScene->AddNodeToRoot(iriCamera);
+        iriScene->SetMainCamera(iriCamera);
+    }
+
+    if (!sm.GetScene("Texture FX Test")) {
+        Scene* fxScene = sm.CreateScene("Texture FX Test");
+        fxScene->SetClearColor(glm::vec3(0.08f, 0.08f, 0.1f));
+
+        // Left: scrolling UVs (conveyor/waterfall/lava look). Right: heat-haze
+        // distortion. Both fall back to a procedural checker when no albedo
+        // texture is assigned, so the animation is visible without an asset --
+        // drag a texture onto the material's Albedo slot to use a real image.
+        std::vector<MeshVertex> v;
+        std::vector<uint32_t> idx;
+
+        // A large upright quad (two triangles) for each effect, facing +Z.
+        auto makeQuad = [](std::vector<MeshVertex>& outV, std::vector<uint32_t>& outI, float halfW, float halfH) {
+            outV = {
+                { {-halfW, -halfH, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f} },
+                { { halfW, -halfH, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f} },
+                { { halfW,  halfH, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f} },
+                { {-halfW,  halfH, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f} },
+            };
+            outI = { 0, 1, 2, 0, 2, 3 };
+        };
+
+        makeQuad(v, idx, 3.0f, 3.0f);
+        TNode* scrollPanel = BuildShadedNode("Scrolling Panel", "scrolling", v, idx, glm::vec4(1.0f, 0.7f, 0.3f, 1.0f));
+        scrollPanel->transform.position = glm::vec3(-3.5f, 3.0f, 0.0f);
+        fxScene->AddNodeToRoot(scrollPanel);
+
+        v.clear(); idx.clear();
+        makeQuad(v, idx, 3.0f, 3.0f);
+        TNode* distortPanel = BuildShadedNode("Distortion Panel", "distortion", v, idx, glm::vec4(0.6f, 0.9f, 1.0f, 1.0f));
+        distortPanel->transform.position = glm::vec3(3.5f, 3.0f, 0.0f);
+        fxScene->AddNodeToRoot(distortPanel);
+
+        fxScene->AddNodeToRoot(BuildShadedGround("pbr", 40.0f, glm::vec4(0.3f, 0.3f, 0.33f, 1.0f)));
+
+        TNode* sunNode = new TNode(nullptr, "Sun");
+        auto* sun = sunNode->AddComponent<LightComponent>(sunNode, LightType::Directional);
+        sun->intensity = 2.5f;
+        sunNode->transform.rotation = glm::vec3(-40.0f, -20.0f, 0.0f);
+        fxScene->AddNodeToRoot(sunNode);
+
+        TNode* fxCamera = new TNode(nullptr, "MainCamera");
+        CameraComponent* cam = fxCamera->AddComponent<CameraComponent>(fxCamera);
+        fxCamera->transform.position = glm::vec3(0.0f, 3.5f, 12.0f);
+        cam->pitch = -6.0f;
+        fxScene->AddNodeToRoot(fxCamera);
+        fxScene->SetMainCamera(fxCamera);
     }
 
     const std::string& lastActiveScene = EngineSettings::GetLastActiveScene();

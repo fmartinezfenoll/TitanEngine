@@ -96,7 +96,7 @@ void Scene::Draw(const Frustum& frustum, const glm::mat4& view, const glm::mat4&
     // --- Opaque pass: meshes (recursive, fills the transparent list) ---
     std::vector<TransparentDrawItem> transparentItems;
     root->draw(frustum, view, projection, cameraWorldPos, lightUniforms, shadowData, iblData, &transparentItems,
-               glm::mat4(1.0f), &fog);
+               glm::mat4(1.0f), &fog, time);
 
     // Walk the tree once for the VFX components (billboards/grass/particles),
     // collecting each with its world matrix. Grass draws now (opaque, alpha-
@@ -144,7 +144,7 @@ void Scene::Draw(const Frustum& frustum, const glm::mat4& view, const glm::mat4&
         if (auto* mesh = item.node->GetComponent<MeshComponent>()) {
             mesh->Draw(item.modelMatrix, item.node->GetComponent<MaterialComponent>(),
                        view, projection, cameraWorldPos, lightUniforms, shadowData, iblData,
-                       item.node->GetComponent<SkinComponent>(), &fog);
+                       item.node->GetComponent<SkinComponent>(), &fog, time);
         }
     }
 
