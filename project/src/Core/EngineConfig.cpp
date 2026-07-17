@@ -115,6 +115,46 @@ void EngineConfig::Load(const std::string& path)
     if (it != values.end())
         EngineSettings::SetUndoHistoryLimit(std::stoi(it->second));
 
+    it = values.find("PostProcess");
+    if (it != values.end())
+        EngineSettings::SetPostProcessEnabled(ToBool(it->second, EngineSettings::IsPostProcessEnabled()));
+
+    it = values.find("Bloom");
+    if (it != values.end())
+        EngineSettings::SetBloomEnabled(ToBool(it->second, EngineSettings::IsBloomEnabled()));
+
+    it = values.find("BloomThreshold");
+    if (it != values.end())
+        EngineSettings::SetBloomThreshold(std::stof(it->second));
+
+    it = values.find("BloomIntensity");
+    if (it != values.end())
+        EngineSettings::SetBloomIntensity(std::stof(it->second));
+
+    it = values.find("Tonemap");
+    if (it != values.end())
+        EngineSettings::SetTonemapEnabled(ToBool(it->second, EngineSettings::IsTonemapEnabled()));
+
+    it = values.find("Exposure");
+    if (it != values.end())
+        EngineSettings::SetExposure(std::stof(it->second));
+
+    it = values.find("FXAA");
+    if (it != values.end())
+        EngineSettings::SetFXAAEnabled(ToBool(it->second, EngineSettings::IsFXAAEnabled()));
+
+    it = values.find("SSAO");
+    if (it != values.end())
+        EngineSettings::SetSSAOEnabled(ToBool(it->second, EngineSettings::IsSSAOEnabled()));
+
+    it = values.find("SSAORadius");
+    if (it != values.end())
+        EngineSettings::SetSSAORadius(std::stof(it->second));
+
+    it = values.find("SSAOIntensity");
+    if (it != values.end())
+        EngineSettings::SetSSAOIntensity(std::stof(it->second));
+
     Log::Info("Loaded engine settings from " + path);
 }
 
@@ -144,4 +184,14 @@ void EngineConfig::Save(const std::string& path)
     file << "AutoSaveIntervalSeconds=" << EngineSettings::GetAutoSaveIntervalSeconds() << "\n";
     file << "LastActiveScene=" << EngineSettings::GetLastActiveScene() << "\n";
     file << "UndoHistoryLimit=" << EngineSettings::GetUndoHistoryLimit() << "\n";
+    file << "PostProcess=" << (EngineSettings::IsPostProcessEnabled() ? 1 : 0) << "\n";
+    file << "Bloom=" << (EngineSettings::IsBloomEnabled() ? 1 : 0) << "\n";
+    file << "BloomThreshold=" << EngineSettings::GetBloomThreshold() << "\n";
+    file << "BloomIntensity=" << EngineSettings::GetBloomIntensity() << "\n";
+    file << "Tonemap=" << (EngineSettings::IsTonemapEnabled() ? 1 : 0) << "\n";
+    file << "Exposure=" << EngineSettings::GetExposure() << "\n";
+    file << "FXAA=" << (EngineSettings::IsFXAAEnabled() ? 1 : 0) << "\n";
+    file << "SSAO=" << (EngineSettings::IsSSAOEnabled() ? 1 : 0) << "\n";
+    file << "SSAORadius=" << EngineSettings::GetSSAORadius() << "\n";
+    file << "SSAOIntensity=" << EngineSettings::GetSSAOIntensity() << "\n";
 }

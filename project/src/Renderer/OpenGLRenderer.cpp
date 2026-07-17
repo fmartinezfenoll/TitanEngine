@@ -13,6 +13,7 @@
 #include "Scene/MeshComponent.h"
 #include "Renderer/GizmoRenderer.h"
 #include "Renderer/Skybox.h"
+#include "Renderer/PostProcessor.h"
 #include "Renderer/BillboardGeometry.h"
 #include "Debug/DebugUI.h"
 #include "Debug/ProjectBrowser.h"
@@ -34,6 +35,8 @@
 namespace {
     constexpr unsigned int kShadowTextureUnitBase = 3; // 0-2 reserved by Material (albedo/normal/metallicRoughness)
 }
+
+OpenGLRenderer::~OpenGLRenderer() = default;
 
 void OpenGLRenderer::Register()
 {
@@ -138,6 +141,8 @@ bool OpenGLRenderer::Init(int width, int height, const std::string& appName)
     GizmoRenderer::Init();
     Skybox::InitSharedGeometry();
     BillboardGeometry::Init();
+    PostProcessor::InitSharedGeometry();
+    postProcessor = std::make_unique<PostProcessor>();
 
     std::cout << "OpenGL Version: " << glGetString(GL_VERSION) << std::endl;
     std::cout << "Renderer: " << glGetString(GL_RENDERER) << std::endl;
@@ -149,6 +154,8 @@ bool OpenGLRenderer::Init(int width, int height, const std::string& appName)
 void OpenGLRenderer::Shutdown()
 {
     if (brdfLUTID != 0) glDeleteTextures(1, &brdfLUTID);
+    if (postProcessor) { postProcessor->Cleanup(); postProcessor.reset(); }
+    PostProcessor::ShutdownSharedGeometry();
     Skybox::ShutdownSharedGeometry();
     BillboardGeometry::Shutdown();
     GizmoRenderer::Shutdown();
@@ -234,6 +241,14 @@ void OpenGLRenderer::BeginFrame()
     if (Scene* activeScene = SceneManager::Instance().GetActiveScene()) {
         clearColor = activeScene->GetClearColor();
     }
+
+    // When post-processing is on, capture the scene into the HDR framebuffer
+    // instead of the default one; the effect chain later resolves it to screen.
+    if (EngineSettings::IsPostProcessEnabled() && postProcessor) {
+        postProcessor->EnsureResources(Viewport::GetWidth(), Viewport::GetHeight());
+        postProcessor->BeginSceneCapture();
+    }
+
     glClearColor(clearColor.r, clearColor.g, clearColor.b, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
@@ -521,6 +536,14 @@ void OpenGLRenderer::Render()
         }
 
         if (wireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+
+        // Resolve the post-process chain: the HDR scene captured above is run
+        // through the enabled effects and written to the default framebuffer.
+        // Editor overlays (gizmos/grid/selection) are drawn AFTER this so they
+        // are not affected by bloom/FXAA/etc.
+        if (EngineSettings::IsPostProcessEnabled() && postProcessor) {
+            postProcessor->Resolve(projection);
+        }
 
         DrawGizmos(activeScene, view, projection);
         DrawSelectionHighlight(activeScene, view, projection);

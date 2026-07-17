@@ -1131,6 +1131,63 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
             EngineSettings::SetIBLEnabled(iblEnabled);
         }
 
+        if (ImGui::TreeNode("Post-processing")) {
+            bool ppEnabled = EngineSettings::IsPostProcessEnabled();
+            if (ImGui::Checkbox("Enable Post-processing", &ppEnabled)) {
+                EngineSettings::SetPostProcessEnabled(ppEnabled);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Master switch. When off, the scene renders straight to screen (no overhead).");
+            }
+
+            // The individual effect controls only matter when the master is on.
+            if (!ppEnabled) ImGui::BeginDisabled();
+
+            ImGui::SeparatorText("Bloom + Tone mapping");
+            bool bloom = EngineSettings::IsBloomEnabled();
+            if (ImGui::Checkbox("Bloom", &bloom)) EngineSettings::SetBloomEnabled(bloom);
+
+            float bloomThreshold = EngineSettings::GetBloomThreshold();
+            if (ImGui::DragFloat("Bloom Threshold", &bloomThreshold, 0.02f, 0.0f, 10.0f)) {
+                EngineSettings::SetBloomThreshold(bloomThreshold);
+            }
+
+            float bloomIntensity = EngineSettings::GetBloomIntensity();
+            if (ImGui::DragFloat("Bloom Intensity", &bloomIntensity, 0.02f, 0.0f, 5.0f)) {
+                EngineSettings::SetBloomIntensity(bloomIntensity);
+            }
+
+            bool tonemap = EngineSettings::IsTonemapEnabled();
+            if (ImGui::Checkbox("Tone mapping (ACES)", &tonemap)) EngineSettings::SetTonemapEnabled(tonemap);
+
+            float exposure = EngineSettings::GetExposure();
+            if (ImGui::DragFloat("Exposure", &exposure, 0.02f, 0.0f, 8.0f)) {
+                EngineSettings::SetExposure(exposure);
+            }
+
+            ImGui::SeparatorText("Anti-aliasing");
+            bool fxaa = EngineSettings::IsFXAAEnabled();
+            if (ImGui::Checkbox("FXAA", &fxaa)) EngineSettings::SetFXAAEnabled(fxaa);
+
+            ImGui::SeparatorText("Ambient Occlusion");
+            bool ssao = EngineSettings::IsSSAOEnabled();
+            if (ImGui::Checkbox("SSAO", &ssao)) EngineSettings::SetSSAOEnabled(ssao);
+
+            float ssaoRadius = EngineSettings::GetSSAORadius();
+            if (ImGui::DragFloat("SSAO Radius", &ssaoRadius, 0.01f, 0.01f, 5.0f)) {
+                EngineSettings::SetSSAORadius(ssaoRadius);
+            }
+
+            float ssaoIntensity = EngineSettings::GetSSAOIntensity();
+            if (ImGui::DragFloat("SSAO Intensity", &ssaoIntensity, 0.02f, 0.0f, 4.0f)) {
+                EngineSettings::SetSSAOIntensity(ssaoIntensity);
+            }
+
+            if (!ppEnabled) ImGui::EndDisabled();
+
+            ImGui::TreePop();
+        }
+
         if (ImGui::TreeNode("Gizmo Snap")) {
             bool alwaysSnap = EngineSettings::IsAlwaysSnapEnabled();
             if (ImGui::Checkbox("Always Snap", &alwaysSnap)) {

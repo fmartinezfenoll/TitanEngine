@@ -73,6 +73,45 @@ public:
     static int GetUndoHistoryLimit() { return undoHistoryLimit; }
     static void SetUndoHistoryLimit(int limit) { undoHistoryLimit = limit < 1 ? 1 : limit; }
 
+    // --- Post-processing ---
+    // Master switch: when false, the scene renders straight to the screen with
+    // no HDR framebuffer or effect passes (zero overhead). When true, the scene
+    // is rendered to an HDR target and the enabled effects below are applied.
+    static bool IsPostProcessEnabled() { return postProcessEnabled; }
+    static void SetPostProcessEnabled(bool enabled) { postProcessEnabled = enabled; }
+
+    static bool IsBloomEnabled() { return bloomEnabled; }
+    static void SetBloomEnabled(bool enabled) { bloomEnabled = enabled; }
+
+    // Luminance above which a fragment contributes to the bloom halo.
+    static float GetBloomThreshold() { return bloomThreshold; }
+    static void SetBloomThreshold(float value) { bloomThreshold = value < 0.0f ? 0.0f : value; }
+
+    // How strongly the blurred bright pass is added back over the image.
+    static float GetBloomIntensity() { return bloomIntensity; }
+    static void SetBloomIntensity(float value) { bloomIntensity = value < 0.0f ? 0.0f : value; }
+
+    // Tone mapping (HDR -> LDR). Uses the exposure below (ACES filmic curve).
+    static bool IsTonemapEnabled() { return tonemapEnabled; }
+    static void SetTonemapEnabled(bool enabled) { tonemapEnabled = enabled; }
+
+    static float GetExposure() { return exposure; }
+    static void SetExposure(float value) { exposure = value < 0.0f ? 0.0f : value; }
+
+    static bool IsFXAAEnabled() { return fxaaEnabled; }
+    static void SetFXAAEnabled(bool enabled) { fxaaEnabled = enabled; }
+
+    static bool IsSSAOEnabled() { return ssaoEnabled; }
+    static void SetSSAOEnabled(bool enabled) { ssaoEnabled = enabled; }
+
+    // World-space sampling radius of the SSAO hemisphere.
+    static float GetSSAORadius() { return ssaoRadius; }
+    static void SetSSAORadius(float value) { ssaoRadius = value < 0.001f ? 0.001f : value; }
+
+    // How strongly the ambient occlusion darkens the ambient term.
+    static float GetSSAOIntensity() { return ssaoIntensity; }
+    static void SetSSAOIntensity(float value) { ssaoIntensity = value < 0.0f ? 0.0f : value; }
+
 private:
     static inline bool frustumCullingEnabled = true;
     static inline bool distanceCullEnabled = false;
@@ -92,4 +131,15 @@ private:
     static inline float autoSaveIntervalSeconds = 300.0f;
     static inline std::string lastActiveScene = "";
     static inline int undoHistoryLimit = 25;
+
+    static inline bool postProcessEnabled = false;
+    static inline bool bloomEnabled = true;
+    static inline float bloomThreshold = 1.0f;
+    static inline float bloomIntensity = 0.6f;
+    static inline bool tonemapEnabled = true;
+    static inline float exposure = 1.0f;
+    static inline bool fxaaEnabled = true;
+    static inline bool ssaoEnabled = false;
+    static inline float ssaoRadius = 0.5f;
+    static inline float ssaoIntensity = 1.0f;
 };

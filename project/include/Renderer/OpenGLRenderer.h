@@ -11,6 +11,7 @@
 class Scene;
 class TNode;
 class ShadowFramebuffer;
+class PostProcessor;
 
 struct ShadowMapData {
     TNode* lightNode;
@@ -26,7 +27,9 @@ class OpenGLRenderer : public IRenderer
 {
 public:
     OpenGLRenderer() = default;
-    ~OpenGLRenderer() override = default;
+    // Defined in the .cpp because the unique_ptr<PostProcessor> member needs the
+    // complete type at the destructor's definition point.
+    ~OpenGLRenderer() override;
 
     static void Register(); // Explicit backend registration
 
@@ -56,6 +59,8 @@ private:
     bool appliedVSync = true;
 
     unsigned int brdfLUTID = 0;
+
+    std::unique_ptr<PostProcessor> postProcessor;
 
     std::unordered_map<TNode*, std::unique_ptr<ShadowFramebuffer>> shadowFramebuffers;
 
