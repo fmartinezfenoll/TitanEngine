@@ -3390,7 +3390,16 @@ void DebugUI::DrawSceneSelector(SceneManager* sceneManager) {
     const auto& scenes = sceneManager->GetAllScenes();
 
     if (ImGui::BeginCombo("##SceneList", sceneManager->GetActiveSceneName().c_str())) {
+        // GetAllScenes() returns an unordered_map, so sort the names for a
+        // stable, alphabetical listing in the selector.
+        std::vector<std::string> sceneNames;
+        sceneNames.reserve(scenes.size());
         for (const auto& [name, scene] : scenes) {
+            sceneNames.push_back(name);
+        }
+        std::sort(sceneNames.begin(), sceneNames.end());
+
+        for (const std::string& name : sceneNames) {
             bool isSelected = (sceneManager->GetActiveSceneName() == name);
             if (ImGui::Selectable(name.c_str(), isSelected)) {
                 sceneManager->LoadScene(name);
