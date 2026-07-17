@@ -1,0 +1,406 @@
+{
+  "clearColor": [
+    0.07999999821186066,
+    0.07999999821186066,
+    0.10000000149011612
+  ],
+  "fog": {
+    "color": [
+      0.6000000238418579,
+      0.6499999761581421,
+      0.699999988079071
+    ],
+    "density": 0.029999999329447746,
+    "enabled": false,
+    "end": 60.0,
+    "mode": 2,
+    "start": 10.0
+  },
+  "root": {
+    "children": [
+      {
+        "boundingBox": {
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "extents": [
+            3.0,
+            3.0,
+            0.0
+          ],
+          "type": "aabb"
+        },
+        "components": [
+          {
+            "indices": [
+              0,
+              1,
+              2,
+              0,
+              2,
+              3
+            ],
+            "type": "mesh",
+            "vertices": [
+              -3.0,
+              -3.0,
+              0.0,
+              0.0,
+              0.0,
+              1.0,
+              0.0,
+              0.0,
+              3.0,
+              -3.0,
+              0.0,
+              0.0,
+              0.0,
+              1.0,
+              1.0,
+              0.0,
+              3.0,
+              3.0,
+              0.0,
+              0.0,
+              0.0,
+              1.0,
+              1.0,
+              1.0,
+              -3.0,
+              3.0,
+              0.0,
+              0.0,
+              0.0,
+              1.0,
+              0.0,
+              1.0
+            ]
+          },
+          {
+            "baseColor": [
+              1.0,
+              0.699999988079071,
+              0.30000001192092896,
+              1.0
+            ],
+            "emissiveColor": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "emissiveIntensity": 0.0,
+            "metallicFactor": 1.0,
+            "roughnessFactor": 1.0,
+            "shader": "scrolling",
+            "transparent": false,
+            "type": "material"
+          }
+        ],
+        "name": "Scrolling Panel",
+        "transform": {
+          "position": [
+            -3.5,
+            3.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      {
+        "boundingBox": {
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "extents": [
+            3.0,
+            3.0,
+            0.0
+          ],
+          "type": "aabb"
+        },
+        "components": [
+          {
+            "indices": [
+              0,
+              1,
+              2,
+              0,
+              2,
+              3
+            ],
+            "type": "mesh",
+            "vertices": [
+              -3.0,
+              -3.0,
+              0.0,
+              0.0,
+              0.0,
+              1.0,
+              0.0,
+              0.0,
+              3.0,
+              -3.0,
+              0.0,
+              0.0,
+              0.0,
+              1.0,
+              1.0,
+              0.0,
+              3.0,
+              3.0,
+              0.0,
+              0.0,
+              0.0,
+              1.0,
+              1.0,
+              1.0,
+              -3.0,
+              3.0,
+              0.0,
+              0.0,
+              0.0,
+              1.0,
+              0.0,
+              1.0
+            ]
+          },
+          {
+            "baseColor": [
+              0.6000000238418579,
+              0.8999999761581421,
+              1.0,
+              1.0
+            ],
+            "emissiveColor": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "emissiveIntensity": 0.0,
+            "metallicFactor": 1.0,
+            "roughnessFactor": 1.0,
+            "shader": "distortion",
+            "transparent": false,
+            "type": "material"
+          }
+        ],
+        "name": "Distortion Panel",
+        "transform": {
+          "position": [
+            3.5,
+            3.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      {
+        "boundingBox": {
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "extents": [
+            20.0,
+            0.0,
+            20.0
+          ],
+          "type": "aabb"
+        },
+        "components": [
+          {
+            "indices": [
+              0,
+              2,
+              1,
+              1,
+              2,
+              3
+            ],
+            "type": "mesh",
+            "vertices": [
+              -20.0,
+              0.0,
+              -20.0,
+              0.0,
+              1.0,
+              0.0,
+              0.0,
+              0.0,
+              20.0,
+              0.0,
+              -20.0,
+              0.0,
+              1.0,
+              0.0,
+              1.0,
+              0.0,
+              -20.0,
+              0.0,
+              20.0,
+              0.0,
+              1.0,
+              0.0,
+              0.0,
+              1.0,
+              20.0,
+              0.0,
+              20.0,
+              0.0,
+              1.0,
+              0.0,
+              1.0,
+              1.0
+            ]
+          },
+          {
+            "baseColor": [
+              0.30000001192092896,
+              0.30000001192092896,
+              0.33000001311302185,
+              1.0
+            ],
+            "emissiveColor": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "emissiveIntensity": 0.0,
+            "metallicFactor": 1.0,
+            "roughnessFactor": 1.0,
+            "shader": "pbr",
+            "transparent": false,
+            "type": "material"
+          }
+        ],
+        "name": "Ground",
+        "transform": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      {
+        "components": [
+          {
+            "color": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "innerConeDegrees": 20.0,
+            "intensity": 2.5,
+            "lightType": 0,
+            "outerConeDegrees": 30.0,
+            "range": 20.0,
+            "type": "light"
+          }
+        ],
+        "name": "Sun",
+        "transform": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            -40.0,
+            -20.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      {
+        "components": [
+          {
+            "farPlane": 500.0,
+            "fov": 60.0,
+            "mouseSensitivity": 0.10000000149011612,
+            "moveSpeed": 3.0,
+            "nearPlane": 0.10000000149011612,
+            "pitch": -6.0,
+            "type": "camera",
+            "yaw": -90.0
+          }
+        ],
+        "name": "MainCamera",
+        "transform": {
+          "position": [
+            0.0,
+            3.5,
+            12.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      }
+    ],
+    "transform": {
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    }
+  },
+  "showGrid": true,
+  "version": 1
+}

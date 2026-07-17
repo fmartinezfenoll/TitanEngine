@@ -48,7 +48,9 @@ void main()
         color = clamp(hdr, 0.0, 1.0);
     }
 
-    // Gamma correction (linear -> sRGB).
-    color = pow(color, vec3(1.0 / 2.2));
+    // No gamma correction here: the rest of the engine's shaders (pbr, cartoon,
+    // etc.) write straight to a non-sRGB default framebuffer with none applied,
+    // so adding it only here would make postprocessed scenes look washed out
+    // compared to the same scene with postprocessing off.
     FragColor = vec4(color, 1.0);
 }

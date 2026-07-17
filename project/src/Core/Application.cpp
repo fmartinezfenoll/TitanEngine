@@ -102,6 +102,7 @@ void Application::Shutdown()
 {
     EngineConfig::Save();
     DebugUI::Shutdown();
+    SceneManager::Instance().SaveActiveScene();
     SceneManager::Instance().UnloadAllScenes();
     if (renderer)
         renderer->Shutdown();

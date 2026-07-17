@@ -186,6 +186,29 @@ void AddPrimitiveShowcase(Scene* scene, const std::string& shaderName) {
     scene->AddNodeToRoot(pillarR);
 }
 
+// Builds a sphere node with a PBR material set to specific metallic/roughness
+// factors. Used by the PBR grid demo scene to sweep those two parameters.
+TNode* BuildPBRSphere(const std::string& name, const glm::vec4& color,
+                      float metallic, float roughness, float radius = 0.6f) {
+    std::vector<MeshVertex> v;
+    std::vector<uint32_t> idx;
+    MeshPrimitives::Sphere(v, idx, radius, 32, 24);
+
+    auto material = std::make_shared<Material>(ResourceManager::LoadShader("pbr"));
+    material->baseColor = color;
+    material->metallicFactor = metallic;
+    material->roughnessFactor = roughness;
+
+    TNode* node = new TNode(nullptr, name);
+    auto* mesh = node->AddComponent<MeshComponent>(v, idx);
+    node->AddComponent<MaterialComponent>(material);
+
+    glm::vec3 localMin, localMax;
+    mesh->GetLocalBounds(localMin, localMax);
+    node->boundingBox = new AABB(localMin, localMax);
+    return node;
+}
+
 // Adds a colored point light to `scene` at a position, with a given color,
 // intensity and range. Returns the node so callers can tweak it further.
 TNode* AddPointLight(Scene* scene, const std::string& name, const glm::vec3& pos,
@@ -200,41 +223,53 @@ TNode* AddPointLight(Scene* scene, const std::string& name, const glm::vec3& pos
     return node;
 }
 
+// Recursively swaps the shader of every MaterialComponent in `node`'s subtree
+// to `shaderName`, keeping the material's existing albedo texture and base
+// color. Used to re-shade a glTF-loaded model (which comes in with "pbr"
+// materials) with a stylized shader instead.
+void ApplyShaderRecursive(TNode* node, const std::string& shaderName) {
+    if (auto* matComp = node->GetComponent<MaterialComponent>()) {
+        if (matComp->material) {
+            auto newMaterial = std::make_shared<Material>(ResourceManager::LoadShader(shaderName));
+            newMaterial->albedo = matComp->material->albedo;
+            newMaterial->baseColor = matComp->material->baseColor;
+            newMaterial->transparent = matComp->material->transparent;
+            matComp->material = newMaterial;
+        }
+    }
+    for (TNode* child : node->children) {
+        ApplyShaderRecursive(child, shaderName);
+    }
+}
+
 } // namespace
 
 void Application::SetupScenes()
 {
     SceneManager& sm = SceneManager::Instance();
 
-    std::filesystem::path scenesDir("scenes");
-    if (std::filesystem::exists(scenesDir) && !std::filesystem::is_empty(scenesDir)) {
-        sm.LoadAllScenesFromDirectory("scenes");
-    } else {
-        std::filesystem::create_directories("scenes");
+    std::filesystem::create_directories("scenes");
 
+    // Each factory scene is (re)built in memory only when its .scene file is
+    // missing from disk. The first run builds them all; once saved (at the end
+    // of this function), later runs skip past and only the active scene is ever
+    // loaded. Adding a new factory scene here also makes it appear on existing
+    // installs, since its file won't exist yet.
+    if (!sm.SceneFileExists("Triangle Scene")) {
         Scene* triangleScene = sm.CreateScene("Triangle Scene");
         TNode* triangleNode = BuildTriangleNode();
         triangleNode->transform.position = glm::vec3(0.0f, 0.0f, 0.0f);
         triangleScene->AddNodeToRoot(triangleNode);
-        SceneSerializer::SaveScene(triangleScene, "scenes/Triangle Scene.scene");
+    }
 
+    if (!sm.SceneFileExists("Square Scene")) {
         Scene* squareScene = sm.CreateScene("Square Scene");
         TNode* squareNode = BuildSquareNode();
         squareNode->transform.position = glm::vec3(0.0f, 0.0f, 0.0f);
         squareScene->AddNodeToRoot(squareNode);
-        SceneSerializer::SaveScene(squareScene, "scenes/Square Scene.scene");
-
-        sm.LoadScene("Triangle Scene");
     }
 
-    if (!sm.GetScene("GLTF Scene")) {
-        Scene* gltfScene = sm.CreateScene("GLTF Scene");
-        for (TNode* node : GLTFLoader::LoadModel("resources/models/Box.glb")) {
-            gltfScene->AddNodeToRoot(node);
-        }
-    }
-
-    if (!sm.GetScene("Duck Scene")) {
+    if (!sm.SceneFileExists("Duck Scene")) {
         Scene* duckScene = sm.CreateScene("Duck Scene");
         for (TNode* node : GLTFLoader::LoadModel("resources/models/Duck.glb")) {
             duckScene->AddNodeToRoot(node);
@@ -242,7 +277,7 @@ void Application::SetupScenes()
         duckScene->AddNodeToRoot(BuildGroundPlaneNode(300.0f));
     }
 
-    if (!sm.GetScene("Animation Test")) {
+    if (!sm.SceneFileExists("Animation Test")) {
         Scene* animScene = sm.CreateScene("Animation Test");
 
         TNode* characterRoot = new TNode(nullptr, "CharacterRoot");
@@ -345,7 +380,7 @@ void Application::SetupScenes()
         animScene->SetMainCamera(cameraNode);
     }
 
-    if (!sm.GetScene("VFX Test")) {
+    if (!sm.SceneFileExists("VFX Test")) {
         Scene* vfxScene = sm.CreateScene("VFX Test");
 
         vfxScene->AddNodeToRoot(BuildGroundPlaneNode(40.0f));
@@ -412,7 +447,7 @@ void Application::SetupScenes()
         vfxScene->SetMainCamera(vfxCamera);
     }
 
-    if (!sm.GetScene("Terrain Test")) {
+    if (!sm.SceneFileExists("Terrain Test")) {
         Scene* terrainScene = sm.CreateScene("Terrain Test");
 
         // Procedural terrain (no heightmap asset needed -- falls back to rolling
@@ -450,7 +485,7 @@ void Application::SetupScenes()
         terrainScene->SetMainCamera(terrainCamera);
     }
 
-    if (!sm.GetScene("Cartoon Test")) {
+    if (!sm.SceneFileExists("Cartoon Test")) {
         Scene* cartoonScene = sm.CreateScene("Cartoon Test");
         cartoonScene->SetClearColor(glm::vec3(0.55f, 0.75f, 0.9f));
 
@@ -479,7 +514,47 @@ void Application::SetupScenes()
         cartoonScene->SetMainCamera(cartoonCamera);
     }
 
-    if (!sm.GetScene("Retro Test")) {
+    if (!sm.SceneFileExists("Cartoon Ship Test")) {
+        Scene* shipScene = sm.CreateScene("Cartoon Ship Test");
+
+        // Skybox instead of a flat clear color -- see Animation Test above.
+        auto skyboxCubemap = ResourceManager::LoadSkyboxFromFolder("cartoon");
+        if (skyboxCubemap) {
+            shipScene->SetSkybox(std::make_shared<Skybox>(skyboxCubemap, "cartoon"));
+        }
+
+        // Stylized sea: a big cel-shaded plane instead of BuildGroundPlaneNode's
+        // default PBR material.
+        shipScene->AddNodeToRoot(BuildShadedGround("cartoon", 80.0f, glm::vec4(0.25f, 0.5f, 0.75f, 1.0f)));
+
+        // Wrapped under its own root so the whole model can be repositioned and
+        // scaled as one unit from the editor once its authored size is known.
+        TNode* shipRoot = new TNode(nullptr, "ShipRoot");
+        shipScene->AddNodeToRoot(shipRoot);
+        for (TNode* node : GLTFLoader::LoadModel("resources/models/ship.glb")) {
+            shipRoot->addChild(node);
+            ApplyShaderRecursive(node, "cartoon");
+        }
+
+        TNode* sunNode = new TNode(nullptr, "Sun");
+        auto* sun = sunNode->AddComponent<LightComponent>(sunNode, LightType::Directional);
+        sun->intensity = 2.2f;
+        sun->color = glm::vec3(1.0f, 0.95f, 0.85f);
+        sunNode->transform.rotation = glm::vec3(-45.0f, -35.0f, 0.0f);
+        shipScene->AddNodeToRoot(sunNode);
+
+        AddPointLight(shipScene, "Warm Fill", glm::vec3(-8.0f, 4.0f,  6.0f), glm::vec3(1.0f, 0.7f, 0.4f), 4.0f, 30.0f);
+        AddPointLight(shipScene, "Cool Fill", glm::vec3( 8.0f, 4.0f, -6.0f), glm::vec3(0.4f, 0.7f, 1.0f), 4.0f, 30.0f);
+
+        TNode* shipCamera = new TNode(nullptr, "MainCamera");
+        CameraComponent* cam = shipCamera->AddComponent<CameraComponent>(shipCamera);
+        shipCamera->transform.position = glm::vec3(0.0f, 6.0f, 20.0f);
+        cam->pitch = -14.0f;
+        shipScene->AddNodeToRoot(shipCamera);
+        shipScene->SetMainCamera(shipCamera);
+    }
+
+    if (!sm.SceneFileExists("Retro Test")) {
         Scene* retroScene = sm.CreateScene("Retro Test");
         // Obra-Dinn-style 1-bit dithering: the shader outputs only black/white,
         // so the clear color barely matters, but keep it dark for framing.
@@ -514,7 +589,7 @@ void Application::SetupScenes()
         retroScene->SetMainCamera(retroCamera);
     }
 
-    if (!sm.GetScene("Water Test")) {
+    if (!sm.SceneFileExists("Water Test")) {
         Scene* waterScene = sm.CreateScene("Water Test");
         waterScene->SetClearColor(glm::vec3(0.1f, 0.15f, 0.2f));
 
@@ -552,7 +627,7 @@ void Application::SetupScenes()
         waterScene->SetMainCamera(waterCamera);
     }
 
-    if (!sm.GetScene("Hologram Test")) {
+    if (!sm.SceneFileExists("Hologram Test")) {
         Scene* holoScene = sm.CreateScene("Hologram Test");
         holoScene->SetClearColor(glm::vec3(0.03f, 0.04f, 0.06f)); // dark so the glow pops
         holoScene->SetGridVisible(false);
@@ -587,7 +662,7 @@ void Application::SetupScenes()
         holoScene->SetMainCamera(holoCamera);
     }
 
-    if (!sm.GetScene("Iridescent Test")) {
+    if (!sm.SceneFileExists("Iridescent Test")) {
         Scene* iriScene = sm.CreateScene("Iridescent Test");
         iriScene->SetClearColor(glm::vec3(0.06f, 0.06f, 0.08f));
 
@@ -611,7 +686,7 @@ void Application::SetupScenes()
         iriScene->SetMainCamera(iriCamera);
     }
 
-    if (!sm.GetScene("Texture FX Test")) {
+    if (!sm.SceneFileExists("Texture FX Test")) {
         Scene* fxScene = sm.CreateScene("Texture FX Test");
         fxScene->SetClearColor(glm::vec3(0.08f, 0.08f, 0.1f));
 
@@ -660,13 +735,132 @@ void Application::SetupScenes()
         fxScene->SetMainCamera(fxCamera);
     }
 
-    const std::string& lastActiveScene = EngineSettings::GetLastActiveScene();
-    if (!lastActiveScene.empty() && sm.GetScene(lastActiveScene)) {
-        sm.LoadScene(lastActiveScene);
-    } else {
-        sm.LoadScene("Duck Scene");
+    if (!sm.SceneFileExists("Phong Components")) {
+        Scene* phongScene = sm.CreateScene("Phong Components");
+        phongScene->SetClearColor(glm::vec3(0.12f, 0.12f, 0.14f));
+        phongScene->SetGridVisible(false);
+
+        // Four identical spheres in a row, each with a shader that isolates one
+        // term of the Phong model: ambient, diffuse, specular, and the full sum.
+        // Read left to right, they show how the three components add up.
+        std::vector<MeshVertex> v;
+        std::vector<uint32_t> idx;
+        glm::vec4 sphereColor(0.8f, 0.3f, 0.3f, 1.0f);
+        const char* shaders[4] = {"phong_ambient", "phong_diffuse", "phong_specular", "phong_full"};
+        const char* names[4] = {"1 Ambient", "2 Diffuse", "3 Specular", "4 Full (sum)"};
+        for (int i = 0; i < 4; ++i) {
+            v.clear(); idx.clear();
+            MeshPrimitives::Sphere(v, idx, 1.1f, 48, 36);
+            TNode* s = BuildShadedNode(names[i], shaders[i], v, idx, sphereColor);
+            s->transform.position = glm::vec3((i - 1.5f) * 3.0f, 1.2f, 0.0f);
+            phongScene->AddNodeToRoot(s);
+        }
+
+        // A single dominant directional light so the diffuse gradient and the
+        // specular highlight are clear and identical on every sphere.
+        TNode* sunNode = new TNode(nullptr, "Sun");
+        auto* sun = sunNode->AddComponent<LightComponent>(sunNode, LightType::Directional);
+        sun->intensity = 1.0f;
+        sun->color = glm::vec3(1.0f);
+        sunNode->transform.rotation = glm::vec3(-35.0f, -35.0f, 0.0f);
+        phongScene->AddNodeToRoot(sunNode);
+
+        TNode* phongCamera = new TNode(nullptr, "MainCamera");
+        CameraComponent* cam = phongCamera->AddComponent<CameraComponent>(phongCamera);
+        phongCamera->transform.position = glm::vec3(0.0f, 2.0f, 9.0f);
+        cam->pitch = -6.0f;
+        phongScene->AddNodeToRoot(phongCamera);
+        phongScene->SetMainCamera(phongCamera);
     }
 
+    if (!sm.SceneFileExists("PBR Grid")) {
+        Scene* pbrScene = sm.CreateScene("PBR Grid");
+        pbrScene->SetClearColor(glm::vec3(0.1f, 0.1f, 0.12f));
+        pbrScene->SetGridVisible(false);
+
+        // Grid of spheres: metalness varies per row (0 at bottom, 1 at top),
+        // roughness varies per column (0 at left, 1 at right). A gold-ish base
+        // color makes the metallic row read clearly. With the skybox + IBL on,
+        // low-roughness metals mirror the environment and high-roughness ones
+        // blur it -- the canonical metallic/roughness showcase.
+        const int rows = 5;    // metalness steps
+        const int cols = 6;    // roughness steps
+        const float spacing = 1.5f;
+        for (int r = 0; r < rows; ++r) {
+            for (int c = 0; c < cols; ++c) {
+                float metallic = static_cast<float>(r) / (rows - 1);
+                float roughness = glm::clamp(static_cast<float>(c) / (cols - 1), 0.05f, 1.0f);
+                glm::vec4 color(1.0f, 0.78f, 0.34f, 1.0f); // warm base, reads well as metal
+                TNode* sphere = BuildPBRSphere("Sphere", color, metallic, roughness);
+                sphere->transform.position = glm::vec3(
+                    (c - (cols - 1) * 0.5f) * spacing,
+                    (r - (rows - 1) * 0.5f) * spacing + (rows - 1) * 0.5f * spacing,
+                    0.0f);
+                pbrScene->AddNodeToRoot(sphere);
+            }
+        }
+
+        auto skyboxCubemap = ResourceManager::LoadSkyboxFromFolder("space");
+        if (skyboxCubemap) {
+            pbrScene->SetSkybox(std::make_shared<Skybox>(skyboxCubemap, "space"));
+        }
+
+        TNode* sunNode = new TNode(nullptr, "Sun");
+        auto* sun = sunNode->AddComponent<LightComponent>(sunNode, LightType::Directional);
+        sun->intensity = 3.0f;
+        sunNode->transform.rotation = glm::vec3(-50.0f, -30.0f, 0.0f);
+        pbrScene->AddNodeToRoot(sunNode);
+
+        TNode* pbrCamera = new TNode(nullptr, "MainCamera");
+        CameraComponent* cam = pbrCamera->AddComponent<CameraComponent>(pbrCamera);
+        pbrCamera->transform.position = glm::vec3(0.0f, 4.0f, 12.0f);
+        cam->pitch = -12.0f;
+        pbrScene->AddNodeToRoot(pbrCamera);
+        pbrScene->SetMainCamera(pbrCamera);
+    }
+
+    if (!sm.SceneFileExists("IBL Demo")) {
+        Scene* iblScene = sm.CreateScene("IBL Demo");
+        iblScene->SetClearColor(glm::vec3(0.1f, 0.1f, 0.12f));
+        iblScene->SetGridVisible(false);
+
+        // A few large smooth metal spheres of increasing roughness, lit ONLY by
+        // the environment (skybox) through IBL -- no punctual lights. This
+        // isolates the image-based lighting contribution: the polished sphere
+        // mirrors the surroundings, the rougher ones show a blurred reflection.
+        float roughnesses[4] = {0.05f, 0.25f, 0.5f, 0.8f};
+        for (int i = 0; i < 4; ++i) {
+            glm::vec4 color(0.95f, 0.95f, 0.97f, 1.0f); // near-white metal
+            TNode* sphere = BuildPBRSphere("Metal Sphere", color, 1.0f, roughnesses[i], 1.1f);
+            sphere->transform.position = glm::vec3((i - 1.5f) * 3.0f, 1.5f, 0.0f);
+            iblScene->AddNodeToRoot(sphere);
+        }
+
+        auto skyboxCubemap = ResourceManager::LoadSkyboxFromFolder("space");
+        if (skyboxCubemap) {
+            iblScene->SetSkybox(std::make_shared<Skybox>(skyboxCubemap, "space"));
+        }
+
+        // A very dim directional light just so the scene isn't purely ambient;
+        // the point of this scene is the environment reflection, not direct light.
+        TNode* sunNode = new TNode(nullptr, "Sun");
+        auto* sun = sunNode->AddComponent<LightComponent>(sunNode, LightType::Directional);
+        sun->intensity = 0.4f;
+        sunNode->transform.rotation = glm::vec3(-50.0f, -30.0f, 0.0f);
+        iblScene->AddNodeToRoot(sunNode);
+
+        TNode* iblCamera = new TNode(nullptr, "MainCamera");
+        CameraComponent* cam = iblCamera->AddComponent<CameraComponent>(iblCamera);
+        iblCamera->transform.position = glm::vec3(0.0f, 2.0f, 10.0f);
+        cam->pitch = -6.0f;
+        iblScene->AddNodeToRoot(iblCamera);
+        iblScene->SetMainCamera(iblCamera);
+    }
+
+    // Every scene still in memory here is one that was just built above (its
+    // file was missing). Give each a default camera/light if it lacks one, then
+    // persist it to disk. Scenes that already existed on disk were never loaded,
+    // so they're untouched.
     for (const auto& [name, scene] : sm.GetAllScenes()) {
         if (!scene->GetMainCamera()) {
             TNode* cameraNode = new TNode(nullptr, "MainCamera");
@@ -691,5 +885,24 @@ void Application::SetupScenes()
             }
             scene->AddNodeToRoot(lightNode);
         }
+
+        SceneSerializer::SaveScene(scene.get(), "scenes/" + name + ".scene");
+    }
+
+    // Drop every generated scene from memory and load only the active one, so
+    // from here on a single scene is resident at a time.
+    sm.UnloadAllScenes();
+
+    std::string activeScene = EngineSettings::GetLastActiveScene();
+    if (activeScene.empty() || !sm.SceneFileExists(activeScene)) {
+        activeScene = sm.SceneFileExists("Duck Scene") ? "Duck Scene" : "";
+    }
+    if (activeScene.empty()) {
+        // Fall back to whatever exists on disk (e.g. only Triangle/Square).
+        std::vector<std::string> available = sm.GetAvailableSceneNames();
+        if (!available.empty()) activeScene = available.front();
+    }
+    if (!activeScene.empty()) {
+        sm.LoadScene(activeScene);
     }
 }

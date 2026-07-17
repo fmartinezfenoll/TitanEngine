@@ -73,4 +73,10 @@ private:
     std::vector<ShadowMapData> RenderShadowPass(Scene* activeScene, const glm::vec3& cameraWorldPos);
     void ReconcileShadowFramebuffers(Scene* activeScene);
     void EnsureBRDFLUTGenerated();
+
+    // Exports the three split-sum IBL textures of the active scene's skybox
+    // (irradiance + prefilter cubemap front faces, and the BRDF LUT) to PNG
+    // files under resources/ibl_debug/, for documentation figures. Bound to a
+    // key in the editor. No-op if there's no skybox/IBL generated.
+    void ExportIBLTextures();
 };

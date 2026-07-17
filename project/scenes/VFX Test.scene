@@ -1,0 +1,482 @@
+{
+  "clearColor": [
+    0.10000000149011612,
+    0.10000000149011612,
+    0.15000000596046448
+  ],
+  "fog": {
+    "color": [
+      0.6000000238418579,
+      0.6499999761581421,
+      0.699999988079071
+    ],
+    "density": 0.029999999329447746,
+    "enabled": false,
+    "end": 60.0,
+    "mode": 2,
+    "start": 10.0
+  },
+  "root": {
+    "children": [
+      {
+        "boundingBox": {
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "extents": [
+            20.0,
+            0.0,
+            20.0
+          ],
+          "type": "aabb"
+        },
+        "components": [
+          {
+            "indices": [
+              0,
+              1,
+              2,
+              0,
+              2,
+              3
+            ],
+            "type": "mesh",
+            "vertices": [
+              -20.0,
+              0.0,
+              20.0,
+              0.0,
+              1.0,
+              0.0,
+              0.0,
+              0.0,
+              20.0,
+              0.0,
+              20.0,
+              0.0,
+              1.0,
+              0.0,
+              1.0,
+              0.0,
+              20.0,
+              0.0,
+              -20.0,
+              0.0,
+              1.0,
+              0.0,
+              1.0,
+              1.0,
+              -20.0,
+              0.0,
+              -20.0,
+              0.0,
+              1.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          {
+            "baseColor": [
+              0.5,
+              0.5,
+              0.5,
+              1.0
+            ],
+            "emissiveColor": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "emissiveIntensity": 0.0,
+            "metallicFactor": 1.0,
+            "roughnessFactor": 1.0,
+            "shader": "pbr",
+            "transparent": false,
+            "type": "material"
+          }
+        ],
+        "name": "Ground",
+        "transform": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      {
+        "components": [
+          {
+            "alphaCutoff": 0.30000001192092896,
+            "areaSize": [
+              30.0,
+              30.0
+            ],
+            "bladeSize": [
+              0.25,
+              0.800000011920929
+            ],
+            "density": 4000,
+            "seed": 1337,
+            "texture": "",
+            "tint": [
+              0.3499999940395355,
+              0.6499999761581421,
+              0.25
+            ],
+            "type": "grass",
+            "windSpeed": 1.5,
+            "windStrength": 0.11999999731779099
+          }
+        ],
+        "name": "Grass",
+        "transform": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      {
+        "components": [
+          {
+            "blendMode": 1,
+            "emitRadius": 0.15000000596046448,
+            "emitRate": 80.0,
+            "endColor": [
+              1.0,
+              0.10000000149011612,
+              0.0,
+              0.0
+            ],
+            "endSize": 0.05000000074505806,
+            "gravity": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "lifetime": 1.2000000476837158,
+            "lifetimeSpread": 0.30000001192092896,
+            "maxParticles": 500,
+            "playing": true,
+            "preset": 1,
+            "startColor": [
+              1.0,
+              0.699999988079071,
+              0.20000000298023224,
+              1.0
+            ],
+            "startSize": 0.6000000238418579,
+            "startVelocity": [
+              0.0,
+              2.5,
+              0.0
+            ],
+            "texture": "",
+            "type": "particles",
+            "velocitySpread": [
+              0.5,
+              0.5,
+              0.5
+            ],
+            "worldSpace": true
+          }
+        ],
+        "name": "Campfire Fire",
+        "transform": {
+          "position": [
+            0.0,
+            0.30000001192092896,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      {
+        "components": [
+          {
+            "blendMode": 0,
+            "emitRadius": 0.20000000298023224,
+            "emitRate": 30.0,
+            "endColor": [
+              0.10000000149011612,
+              0.10000000149011612,
+              0.10000000149011612,
+              0.0
+            ],
+            "endSize": 1.5,
+            "gravity": [
+              0.0,
+              0.30000001192092896,
+              0.0
+            ],
+            "lifetime": 3.0,
+            "lifetimeSpread": 0.800000011920929,
+            "maxParticles": 500,
+            "playing": true,
+            "preset": 2,
+            "startColor": [
+              0.30000001192092896,
+              0.30000001192092896,
+              0.30000001192092896,
+              0.6000000238418579
+            ],
+            "startSize": 0.4000000059604645,
+            "startVelocity": [
+              0.0,
+              1.2000000476837158,
+              0.0
+            ],
+            "texture": "",
+            "type": "particles",
+            "velocitySpread": [
+              0.30000001192092896,
+              0.20000000298023224,
+              0.30000001192092896
+            ],
+            "worldSpace": true
+          }
+        ],
+        "name": "Campfire Smoke",
+        "transform": {
+          "position": [
+            0.0,
+            1.2000000476837158,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      {
+        "components": [
+          {
+            "blendMode": 1,
+            "emitRadius": 0.05000000074505806,
+            "emitRate": 120.0,
+            "endColor": [
+              1.0,
+              0.4000000059604645,
+              0.0,
+              0.0
+            ],
+            "endSize": 0.019999999552965164,
+            "gravity": [
+              0.0,
+              -6.0,
+              0.0
+            ],
+            "lifetime": 0.800000011920929,
+            "lifetimeSpread": 0.30000001192092896,
+            "maxParticles": 500,
+            "playing": true,
+            "preset": 3,
+            "startColor": [
+              1.0,
+              0.8999999761581421,
+              0.5,
+              1.0
+            ],
+            "startSize": 0.11999999731779099,
+            "startVelocity": [
+              0.0,
+              3.0,
+              0.0
+            ],
+            "texture": "",
+            "type": "particles",
+            "velocitySpread": [
+              2.0,
+              1.5,
+              2.0
+            ],
+            "worldSpace": true
+          }
+        ],
+        "name": "Sparks",
+        "transform": {
+          "position": [
+            6.0,
+            0.5,
+            3.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      {
+        "components": [
+          {
+            "alphaCutoff": 0.009999999776482582,
+            "size": [
+              2.0,
+              3.0
+            ],
+            "texture": "",
+            "tint": [
+              0.4000000059604645,
+              0.800000011920929,
+              1.0,
+              0.8999999761581421
+            ],
+            "type": "billboard"
+          }
+        ],
+        "name": "Billboard",
+        "transform": {
+          "position": [
+            -6.0,
+            2.0,
+            2.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      {
+        "components": [
+          {
+            "color": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "innerConeDegrees": 20.0,
+            "intensity": 3.0,
+            "lightType": 0,
+            "outerConeDegrees": 30.0,
+            "range": 20.0,
+            "type": "light"
+          }
+        ],
+        "name": "Sun",
+        "transform": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            -50.0,
+            -30.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      },
+      {
+        "components": [
+          {
+            "farPlane": 500.0,
+            "fov": 60.0,
+            "mouseSensitivity": 0.10000000149011612,
+            "moveSpeed": 3.0,
+            "nearPlane": 0.10000000149011612,
+            "pitch": -18.0,
+            "type": "camera",
+            "yaw": -90.0
+          }
+        ],
+        "name": "MainCamera",
+        "transform": {
+          "position": [
+            0.0,
+            5.0,
+            14.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      }
+    ],
+    "transform": {
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    }
+  },
+  "showGrid": true,
+  "skybox": "space",
+  "version": 1
+}

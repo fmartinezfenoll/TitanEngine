@@ -19,6 +19,7 @@
 #include "Debug/ProjectBrowser.h"
 #include "Core/Stats.h"
 #include "Core/EngineSettings.h"
+#include "Core/Log.h"
 
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
@@ -27,13 +28,37 @@
 #include <backends/imgui_impl_opengl3.h>
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <stb_image_write.h>
+
 #include <algorithm>
 #include <iostream>
 #include <limits>
 #include <vector>
+#include <filesystem>
 
 namespace {
     constexpr unsigned int kShadowTextureUnitBase = 3; // 0-2 reserved by Material (albedo/normal/metallicRoughness)
+
+    // Reads back a GL texture (a 2D texture, or one face of a cubemap) and writes
+    // it to a PNG. `target` is GL_TEXTURE_2D or a GL_TEXTURE_CUBE_MAP_POSITIVE_X+n
+    // face; `bindTarget` is GL_TEXTURE_2D or GL_TEXTURE_CUBE_MAP. Used to export
+    // the IBL textures for documentation figures. HDR/float textures are clamped
+    // to 8-bit on readback, which is fine for an illustrative image.
+    bool ExportGLTextureFace(unsigned int texId, GLenum bindTarget, GLenum target,
+                             int width, int height, const std::string& path)
+    {
+        if (texId == 0 || width <= 0 || height <= 0) return false;
+        std::vector<unsigned char> pixels(static_cast<size_t>(width) * height * 4);
+        glBindTexture(bindTarget, texId);
+        glGetTexImage(target, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+        glBindTexture(bindTarget, 0);
+        if (stbi_write_png(path.c_str(), width, height, 4, pixels.data(), width * 4) == 0) {
+            Log::Error("Failed to export IBL texture to " + path);
+            return false;
+        }
+        Log::Info("Exported IBL texture: " + path);
+        return true;
+    }
 }
 
 OpenGLRenderer::~OpenGLRenderer() = default;
@@ -195,6 +220,16 @@ void OpenGLRenderer::UpdateCameraInput(float deltaTime)
         if (glfwGetKey(win, GLFW_KEY_SPACE) == GLFW_PRESS) moveDir.y += 1.0f;
         if (glfwGetKey(win, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS) moveDir.y -= 1.0f;
         camera->ProcessKeyboard(moveDir, deltaTime);
+
+        // Ctrl+I: export the active scene's IBL textures to PNG (for docs).
+        // Edge-triggered so it fires once per press, not every frame held.
+        static bool iblExportPrev = false;
+        bool iblExportNow = glfwGetKey(win, GLFW_KEY_I) == GLFW_PRESS
+                         && glfwGetKey(win, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS;
+        if (iblExportNow && !iblExportPrev) {
+            ExportIBLTextures();
+        }
+        iblExportPrev = iblExportNow;
     }
 
     if (glfwGetMouseButton(win, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS)
@@ -425,6 +460,15 @@ void OpenGLRenderer::Render()
         std::vector<ShadowMapData> shadowMapData;
         if (EngineSettings::AreShadowsEnabled()) {
             shadowMapData = RenderShadowPass(activeScene, cameraWorldPos);
+
+            // RenderShadowPass ends by unbinding to the default framebuffer (screen),
+            // which is correct when there's no post-processing. When there IS, the
+            // scene must keep rendering into the HDR capture target instead, or the
+            // skybox/geometry below draw straight to the screen and Resolve() then
+            // overwrites them with a composite of the (still-empty) HDR buffer.
+            if (EngineSettings::IsPostProcessEnabled() && postProcessor) {
+                postProcessor->BeginSceneCapture();
+            }
         }
 
         std::vector<LightUniformData> lights;
@@ -657,6 +701,43 @@ void OpenGLRenderer::DrawTransformGizmo(Scene* activeScene, const glm::mat4& vie
             break;
     }
     glEnable(GL_DEPTH_TEST);
+}
+
+void OpenGLRenderer::ExportIBLTextures()
+{
+    Scene* activeScene = SceneManager::Instance().GetActiveScene();
+    Skybox* skybox = activeScene ? activeScene->GetSkybox() : nullptr;
+    if (!skybox) {
+        Log::Warning("ExportIBLTextures: the active scene has no skybox");
+        return;
+    }
+
+    // Make sure the IBL textures exist before reading them back.
+    EnsureBRDFLUTGenerated();
+    skybox->EnsureIBLGenerated();
+    if (!skybox->IsIBLGenerated()) {
+        Log::Warning("ExportIBLTextures: IBL is not generated (is IBL enabled?)");
+        return;
+    }
+
+    std::filesystem::create_directories("resources/ibl_debug");
+
+    // Irradiance + prefilter are cubemaps: export their front (+Z) face as a 2D
+    // image. The BRDF LUT is already a 2D texture.
+    ExportGLTextureFace(skybox->GetIrradianceMap(), GL_TEXTURE_CUBE_MAP,
+                        GL_TEXTURE_CUBE_MAP_POSITIVE_Z,
+                        Skybox::kIrradianceResolution, Skybox::kIrradianceResolution,
+                        "resources/ibl_debug/ibl_irradiance.png");
+
+    ExportGLTextureFace(skybox->GetPrefilterMap(), GL_TEXTURE_CUBE_MAP,
+                        GL_TEXTURE_CUBE_MAP_POSITIVE_Z,
+                        Skybox::kPrefilterResolution, Skybox::kPrefilterResolution,
+                        "resources/ibl_debug/ibl_prefilter.png");
+
+    ExportGLTextureFace(brdfLUTID, GL_TEXTURE_2D, GL_TEXTURE_2D,
+                        512, 512, "resources/ibl_debug/ibl_brdf_lut.png");
+
+    Log::Info("IBL textures exported to resources/ibl_debug/");
 }
 
 void OpenGLRenderer::EndFrame()

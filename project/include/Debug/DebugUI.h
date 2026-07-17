@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <functional>
 #include <glm/glm.hpp>
 #include <imgui.h>
 #include "Scene/TNode.h"
@@ -26,6 +27,12 @@ public:
     static GizmoSpace GetGizmoSpace() { return gizmoSpace; }
     // Selects a standalone .material asset (not tied to any TNode) for editing in the Inspector.
     static void SelectMaterialAsset(const std::string& path);
+
+    // Defers a scene-switching action (load/new/delete) to the end of the current
+    // DrawFrame. Switching destroys the active scene, so doing it mid-UI leaves
+    // the scene pointer the rest of the frame's panels use dangling. Called by
+    // the scene selector and the ProjectBrowser.
+    static void QueueSceneAction(std::function<void()> action);
     // Icon font (Material Symbols subset, see MaterialIcons.h) loaded by ApplyTheme().
     // Activate with ImGui::PushFont(...)/PopFont() around icon glyphs.
     static ImFont* GetIconFont() { return iconFont; }
@@ -80,6 +87,7 @@ private:
     static void DrawDockspace();
 
     static TNode* selectedNode;
+    static std::function<void()> pendingSceneAction; // deferred scene switch, run at end of DrawFrame
     static bool sceneSelected;
     static std::string inspectingMaterialPath; // non-empty = a standalone .material asset is being inspected
     static std::shared_ptr<Material> inspectingMaterial;

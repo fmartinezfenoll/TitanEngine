@@ -220,6 +220,7 @@ TNode* SpawnLightNode(LightType type) {
 } // namespace
 
 TNode* DebugUI::selectedNode = nullptr;
+std::function<void()> DebugUI::pendingSceneAction = nullptr;
 bool DebugUI::sceneSelected = false;
 std::string DebugUI::inspectingMaterialPath = "";
 std::shared_ptr<Material> DebugUI::inspectingMaterial = nullptr;
@@ -281,7 +282,19 @@ char DebugUI::newClipNameBuffer[128] = "";
 char DebugUI::newStateNameBuffer[128] = "";
 
 void DebugUI::Init() {
-    // ImGui context is already created by OpenGLRenderer
+    // ImGui context is already created by OpenGLRenderer.
+
+    // Only the active scene stays loaded, so switching scenes destroys the one
+    // being left. Drop every editor pointer into it the moment that happens, or
+    // the renderer's selection highlight/gizmo (drawn before the next UI frame)
+    // dereferences freed memory.
+    SceneManager::Instance().SetOnActiveSceneChanged([]() {
+        selectedNode = nullptr;
+        multiSelectedNodes.clear();
+        dragNode = nullptr;
+        activeHandle = GizmoHandle::None;
+        UndoManager::Clear();
+    });
 }
 
 void DebugUI::ApplyTheme() {
@@ -946,13 +959,9 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
     Scene* activeScene = sceneManager->GetActiveScene();
     if (!activeScene) return;
 
-    // Clear undo history when the active scene changes so Ctrl+Z can't restore
-    // one scene's snapshot into a different scene.
-    static Scene* lastUndoScene = nullptr;
-    if (activeScene != lastUndoScene) {
-        UndoManager::Clear();
-        lastUndoScene = activeScene;
-    }
+    // Selection/gizmo/undo reset on scene change is handled by the
+    // SetOnActiveSceneChanged callback registered in Init(), which fires the
+    // instant the scene switches (before the renderer touches the selection).
 
     DrawDockspace();
 
@@ -1373,6 +1382,19 @@ void DebugUI::DrawFrame(SceneManager* sceneManager) {
     DrawMultiDeleteConfirmation();
     DrawSaveConfirmation();
     DrawCreatePrefabPopup();
+
+    // Run any deferred scene switch now that all panels are drawn. This is the
+    // only place the active scene is allowed to change during a frame, so the
+    // `activeScene` used above stays valid for the whole frame.
+    if (pendingSceneAction) {
+        std::function<void()> action = std::move(pendingSceneAction);
+        pendingSceneAction = nullptr;
+        action();
+    }
+}
+
+void DebugUI::QueueSceneAction(std::function<void()> action) {
+    pendingSceneAction = std::move(action);
 }
 
 std::string DebugUI::DescribeNode(TNode* node) {
@@ -2510,7 +2532,8 @@ void DebugUI::DrawDeleteConfirmation() {
         ImGui::SetCursorPosX(std::max(0.0f, (ImGui::GetWindowSize().x - totalWidth) * 0.5f));
 
         if (ImGui::Button("Delete Forever", ImVec2(buttonWidth, 0))) {
-            SceneManager::Instance().UnloadScene(sceneToDelete);
+            std::string target = sceneToDelete;
+            QueueSceneAction([target]() { SceneManager::Instance().UnloadScene(target); });
             sceneToDelete = "";
             showDeleteConfirm = false;
         }
@@ -3387,24 +3410,20 @@ void DebugUI::DrawSceneSelector(SceneManager* sceneManager) {
     if (!sceneManager) return;
 
     ImGui::Text("Scenes:");
-    const auto& scenes = sceneManager->GetAllScenes();
 
     if (ImGui::BeginCombo("##SceneList", sceneManager->GetActiveSceneName().c_str())) {
-        // GetAllScenes() returns an unordered_map, so sort the names for a
-        // stable, alphabetical listing in the selector.
-        std::vector<std::string> sceneNames;
-        sceneNames.reserve(scenes.size());
-        for (const auto& [name, scene] : scenes) {
-            sceneNames.push_back(name);
-        }
-        std::sort(sceneNames.begin(), sceneNames.end());
+        // Only the active scene is kept in memory, so the list of selectable
+        // scenes comes from the .scene files on disk (already sorted).
+        std::vector<std::string> sceneNames = sceneManager->GetAvailableSceneNames();
 
         for (const std::string& name : sceneNames) {
             bool isSelected = (sceneManager->GetActiveSceneName() == name);
             if (ImGui::Selectable(name.c_str(), isSelected)) {
-                sceneManager->LoadScene(name);
-                EngineSettings::SetLastActiveScene(name);
-                EngineConfig::Save();
+                QueueSceneAction([sceneManager, name]() {
+                    sceneManager->LoadScene(name);
+                    EngineSettings::SetLastActiveScene(name);
+                    EngineConfig::Save();
+                });
             }
             if (isSelected) {
                 ImGui::SetItemDefaultFocus();
@@ -3418,20 +3437,24 @@ void DebugUI::DrawSceneSelector(SceneManager* sceneManager) {
     };
 
     if (ImGui::Button("New Scene##btn")) {
-        static int sceneCounter = 1;
-        std::string newSceneName = "Scene_" + std::to_string(sceneCounter++);
-        sceneManager->CreateScene(newSceneName);
-        sceneManager->LoadScene(newSceneName);
-        EngineSettings::SetLastActiveScene(newSceneName);
-        EngineConfig::Save();
+        // Pick a name that isn't already taken on disk.
+        int sceneCounter = 1;
+        std::string newSceneName = "Scene_" + std::to_string(sceneCounter);
+        while (sceneManager->SceneFileExists(newSceneName)) {
+            newSceneName = "Scene_" + std::to_string(++sceneCounter);
+        }
+        QueueSceneAction([sceneManager, newSceneName]() {
+            sceneManager->NewScene(newSceneName);
+            EngineSettings::SetLastActiveScene(newSceneName);
+            EngineConfig::Save();
+        });
     }
 
     ImGuiLayoutUtils::SameLineOrWrap(buttonWidth("Save"), false);
     if (ImGui::Button("Save##btn")) {
         if (sceneManager->GetActiveScene()) {
-            static int saveCounter = 0;
-            std::string fileName = "scenes/" + sceneManager->GetActiveSceneName() + "_" + std::to_string(saveCounter++) + ".scene";
             std::filesystem::create_directories("scenes");
+            std::string fileName = "scenes/" + sceneManager->GetActiveSceneName() + ".scene";
             SceneSerializer::SaveScene(sceneManager->GetActiveScene(), fileName);
         }
     }
@@ -3469,7 +3492,7 @@ void DebugUI::DrawSceneSelector(SceneManager* sceneManager) {
             std::string oldName = sceneManager->GetActiveSceneName();
             if (newName.empty()) {
                 sceneRenameError = "Name cannot be empty.";
-            } else if (newName != oldName && sceneManager->GetScene(newName)) {
+            } else if (newName != oldName && sceneManager->SceneFileExists(newName)) {
                 sceneRenameError = "A scene with that name already exists.";
             } else {
                 if (newName != oldName && sceneManager->RenameScene(oldName, newName)) {

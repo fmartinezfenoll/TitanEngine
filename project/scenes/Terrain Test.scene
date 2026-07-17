@@ -1,0 +1,212 @@
+{
+  "clearColor": [
+    0.6200000047683716,
+    0.6700000166893005,
+    0.75
+  ],
+  "fog": {
+    "color": [
+      0.6200000047683716,
+      0.6700000166893005,
+      0.75
+    ],
+    "density": 0.012000000104308128,
+    "enabled": true,
+    "end": 60.0,
+    "mode": 2,
+    "start": 10.0
+  },
+  "root": {
+    "children": [
+      {
+        "children": [
+          {
+            "children": [
+              {
+                "boundingBox": {
+                  "center": [
+                    0.0,
+                    7.070400714874268,
+                    0.0
+                  ],
+                  "extents": [
+                    60.0,
+                    6.656798839569092,
+                    60.0
+                  ],
+                  "type": "aabb"
+                },
+                "components": [
+                  {
+                    "baseColor": [
+                      0.44999998807907104,
+                      0.4000000059604645,
+                      0.30000001192092896,
+                      1.0
+                    ],
+                    "emissiveColor": [
+                      1.0,
+                      1.0,
+                      1.0
+                    ],
+                    "emissiveIntensity": 0.0,
+                    "metallicFactor": 1.0,
+                    "roughnessFactor": 1.0,
+                    "shader": "pbr",
+                    "transparent": false,
+                    "type": "material"
+                  },
+                  {
+                    "heightScale": 14.0,
+                    "heightmap": "",
+                    "resolution": 200,
+                    "size": 120.0,
+                    "type": "terrain"
+                  }
+                ],
+                "name": "Terrain",
+                "transform": {
+                  "position": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "rotation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                }
+              },
+              {
+                "components": [
+                  {
+                    "color": [
+                      1.0,
+                      1.0,
+                      1.0
+                    ],
+                    "innerConeDegrees": 20.0,
+                    "intensity": 3.0,
+                    "lightType": 0,
+                    "outerConeDegrees": 30.0,
+                    "range": 20.0,
+                    "type": "light"
+                  }
+                ],
+                "name": "Sun",
+                "transform": {
+                  "position": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "rotation": [
+                    -50.0,
+                    -30.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                }
+              },
+              {
+                "components": [
+                  {
+                    "farPlane": 500.0,
+                    "fov": 60.0,
+                    "mouseSensitivity": 0.10000000149011612,
+                    "moveSpeed": 3.0,
+                    "nearPlane": 0.10000000149011612,
+                    "pitch": -22.0,
+                    "type": "camera",
+                    "yaw": -90.0
+                  }
+                ],
+                "name": "MainCamera",
+                "transform": {
+                  "position": [
+                    -3.276083475611813e-07,
+                    21.97189712524414,
+                    47.50523376464844
+                  ],
+                  "rotation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                }
+              }
+            ],
+            "transform": {
+              "position": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ]
+            }
+          }
+        ],
+        "transform": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      }
+    ],
+    "transform": {
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    }
+  },
+  "showGrid": true,
+  "version": 1
+}

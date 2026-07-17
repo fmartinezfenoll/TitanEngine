@@ -34,7 +34,7 @@ imgui.ini
 # Scratch/duplicate scenes generated while testing the editor (e.g. ProjectBrowser's
 # Duplicate action naming a copy "<name>_0.scene", "<name>_copy.scene", etc.)
 /project/scenes/*_copy*.scene
-/project/scenes/*_[0-9].scene
+/project/scenes/*_[0-9]*.scene
 
 # Auto-named scratch materials created via ProjectBrowser's "New Material" button
 # (default name "Material_N.material") while testing, not deliberately-named assets.

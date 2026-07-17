@@ -357,15 +357,16 @@ static bool CurrentDirHasSegment(const std::filesystem::path& dir, const char* s
 }
 
 void ProjectBrowser::CreateNewScene(SceneManager* sceneManager) {
-    static int sceneCounter = 1;
-    std::string newSceneName = "Scene_" + std::to_string(sceneCounter++);
-    while (sceneManager->GetScene(newSceneName)) {
-        newSceneName = "Scene_" + std::to_string(sceneCounter++);
+    int sceneCounter = 1;
+    std::string newSceneName = "Scene_" + std::to_string(sceneCounter);
+    while (sceneManager->SceneFileExists(newSceneName)) {
+        newSceneName = "Scene_" + std::to_string(++sceneCounter);
     }
-    sceneManager->CreateScene(newSceneName);
-    sceneManager->LoadScene(newSceneName);
-    EngineSettings::SetLastActiveScene(newSceneName);
-    EngineConfig::Save();
+    DebugUI::QueueSceneAction([sceneManager, newSceneName]() {
+        sceneManager->NewScene(newSceneName);
+        EngineSettings::SetLastActiveScene(newSceneName);
+        EngineConfig::Save();
+    });
 }
 
 void ProjectBrowser::CreateNewMaterial() {
@@ -688,12 +689,11 @@ void ProjectBrowser::HandleActivate(const std::filesystem::path& path, SceneMana
     switch (ClassifyPath(path)) {
         case AssetKind::Scene: {
             std::string sceneName = path.stem().string();
-            if (!sceneManager->GetScene(sceneName)) {
-                sceneManager->LoadSceneNamed(sceneName, path.string());
-            }
-            sceneManager->LoadScene(sceneName);
-            EngineSettings::SetLastActiveScene(sceneName);
-            EngineConfig::Save();
+            DebugUI::QueueSceneAction([sceneManager, sceneName]() {
+                sceneManager->LoadScene(sceneName);
+                EngineSettings::SetLastActiveScene(sceneName);
+                EngineConfig::Save();
+            });
             break;
         }
         case AssetKind::Model: {
@@ -738,12 +738,11 @@ void ProjectBrowser::DrawContextMenu(const std::filesystem::path& path, SceneMan
         case AssetKind::Scene:
             if (ImGui::MenuItem("Load Scene")) {
                 std::string sceneName = path.stem().string();
-                if (!sceneManager->GetScene(sceneName)) {
-                    sceneManager->LoadSceneNamed(sceneName, path.string());
-                }
-                sceneManager->LoadScene(sceneName);
-                EngineSettings::SetLastActiveScene(sceneName);
-                EngineConfig::Save();
+                DebugUI::QueueSceneAction([sceneManager, sceneName]() {
+                    sceneManager->LoadScene(sceneName);
+                    EngineSettings::SetLastActiveScene(sceneName);
+                    EngineConfig::Save();
+                });
             }
             break;
         case AssetKind::Model:
@@ -798,15 +797,14 @@ void ProjectBrowser::DrawContextMenu(const std::filesystem::path& path, SceneMan
             std::string baseName = path.stem().string();
             std::string candidate = baseName + "_copy";
             int suffix = 1;
-            while (sceneManager->GetScene(candidate) || std::filesystem::exists(path.parent_path() / (candidate + ".scene"))) {
+            while (std::filesystem::exists(path.parent_path() / (candidate + ".scene"))) {
                 candidate = baseName + "_copy" + std::to_string(++suffix);
             }
             std::filesystem::path destPath = path.parent_path() / (candidate + ".scene");
             std::error_code ec;
             std::filesystem::copy_file(path, destPath, ec);
-            if (!ec) {
-                sceneManager->LoadSceneNamed(candidate, destPath.string());
-            }
+            // The copy on disk is enough: the scene selector lists from disk, so
+            // it shows up without needing to be loaded into memory.
         }
     } else if (kind != AssetKind::Folder) {
         // Generic file kinds (Material, Texture, Model, Shader, Other): plain
@@ -921,7 +919,7 @@ void ProjectBrowser::DrawRenamePopup(SceneManager* sceneManager) {
                     renamingItem = false;
                     ImGui::CloseCurrentPopup();
                 }
-            } else if (newName != oldName && sceneManager->GetScene(newName)) {
+            } else if (newName != oldName && sceneManager->SceneFileExists(newName)) {
                 renameError = "A scene with that name already exists.";
             } else {
                 if (newName != oldName && sceneManager->RenameScene(oldName, newName)) {
@@ -965,7 +963,16 @@ std::string ProjectBrowser::DeleteOneAsset(const std::filesystem::path& target, 
         std::error_code ec;
         std::filesystem::remove_all(target, ec);
     } else if (kind == AssetKind::Scene) {
-        sceneManager->UnloadScene(target.stem().string());
+        std::string sceneName = target.stem().string();
+        if (sceneName == sceneManager->GetActiveSceneName()) {
+            // Deleting the active scene switches to another one, which destroys
+            // the current scene -- defer to the end of the frame so the panels
+            // still using it this frame don't dangle.
+            DebugUI::QueueSceneAction([sceneManager, sceneName]() { sceneManager->UnloadScene(sceneName); });
+        } else {
+            // Non-active scene: UnloadScene just removes the file, no switch.
+            sceneManager->UnloadScene(sceneName);
+        }
     } else {
         std::error_code ec;
         std::filesystem::remove(target, ec);
