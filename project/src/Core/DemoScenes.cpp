@@ -248,7 +248,7 @@ void Application::SetupScenes()
 {
     SceneManager& sm = SceneManager::Instance();
 
-    std::filesystem::create_directories("scenes");
+    std::filesystem::create_directories("resources/scenes");
 
     // Each factory scene is (re)built in memory only when its .scene file is
     // missing from disk. The first run builds them all; once saved (at the end
@@ -886,7 +886,7 @@ void Application::SetupScenes()
             scene->AddNodeToRoot(lightNode);
         }
 
-        SceneSerializer::SaveScene(scene.get(), "scenes/" + name + ".scene");
+        SceneSerializer::SaveScene(scene.get(), "resources/scenes/" + name + ".scene");
     }
 
     // Drop every generated scene from memory and load only the active one, so

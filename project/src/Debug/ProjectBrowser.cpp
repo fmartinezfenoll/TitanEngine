@@ -296,7 +296,7 @@ void ProjectBrowser::DrawRoots() {
     }
     ImGui::SameLine();
     if (ImGui::Button("Scenes##root")) {
-        currentDir = "scenes";
+        currentDir = "resources/scenes";
         selectedPath.clear();
         multiSelectedPaths.clear();
     }

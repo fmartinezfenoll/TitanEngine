@@ -6,7 +6,7 @@
 #include "Core/Log.h"
 
 namespace {
-constexpr const char* kScenesDir = "scenes";
+constexpr const char* kScenesDir = "resources/scenes";
 
 std::string ScenePath(const std::string& name) {
     return std::string(kScenesDir) + "/" + name + ".scene";

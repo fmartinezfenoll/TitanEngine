@@ -1,0 +1,159 @@
+{
+  "clearColor": [
+    0.10000000149011612,
+    0.10000000149011612,
+    0.15000000596046448
+  ],
+  "fog": {
+    "color": [
+      0.6000000238418579,
+      0.6499999761581421,
+      0.699999988079071
+    ],
+    "density": 0.029999999329447746,
+    "enabled": false,
+    "end": 60.0,
+    "mode": 2,
+    "start": 10.0
+  },
+  "root": {
+    "children": [
+      {
+        "children": [
+          {
+            "children": [
+              {
+                "components": [
+                  {
+                    "indices": [
+                      0,
+                      1,
+                      2
+                    ],
+                    "type": "mesh",
+                    "vertices": [
+                      -0.5,
+                      -0.5,
+                      0.0,
+                      0.0,
+                      0.0,
+                      0.0,
+                      0.0,
+                      0.0,
+                      0.5,
+                      -0.5,
+                      0.0,
+                      0.0,
+                      0.0,
+                      0.0,
+                      0.0,
+                      0.0,
+                      0.0,
+                      0.5,
+                      0.0,
+                      0.0,
+                      0.0,
+                      0.0,
+                      0.0,
+                      0.0
+                    ]
+                  },
+                  {
+                    "baseColor": [
+                      1.0,
+                      1.0,
+                      1.0,
+                      1.0
+                    ],
+                    "emissiveColor": [
+                      1.0,
+                      1.0,
+                      1.0
+                    ],
+                    "emissiveIntensity": 0.0,
+                    "metallicFactor": 1.0,
+                    "roughnessFactor": 1.0,
+                    "shader": "basic",
+                    "transparent": false,
+                    "type": "material"
+                  }
+                ],
+                "name": "Triangle",
+                "transform": {
+                  "position": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "rotation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0,
+                    1.0
+                  ]
+                }
+              }
+            ],
+            "transform": {
+              "position": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ]
+            }
+          }
+        ],
+        "transform": {
+          "position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      }
+    ],
+    "transform": {
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    }
+  },
+  "showGrid": true,
+  "version": 1
+}

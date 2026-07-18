@@ -1,6 +1,9 @@
 # Build output
 /build/
 
+# City stress-test model: exceeds GitHub's 100MB file size limit, kept local-only.
+/project/resources/models/ua.glb
+
 # Object files
 *.o
 *.obj
@@ -29,12 +32,12 @@ Thumbs.db
 imgui.ini
 
 # Auto-save backups (regenerated periodically, not real scene content)
-/project/scenes/*_autosave.scene
+/project/resources/scenes/*_autosave.scene
 
 # Scratch/duplicate scenes generated while testing the editor (e.g. ProjectBrowser's
 # Duplicate action naming a copy "<name>_0.scene", "<name>_copy.scene", etc.)
-/project/scenes/*_copy*.scene
-/project/scenes/*_[0-9]*.scene
+/project/resources/scenes/*_copy*.scene
+/project/resources/scenes/*_[0-9]*.scene
 
 # Auto-named scratch materials created via ProjectBrowser's "New Material" button
 # (default name "Material_N.material") while testing, not deliberately-named assets.

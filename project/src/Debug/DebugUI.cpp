@@ -2573,8 +2573,8 @@ void DebugUI::DrawSaveConfirmation() {
         ImGui::SetCursorPosX(std::max(0.0f, (ImGui::GetWindowSize().x - totalWidth) * 0.5f));
 
         if (ImGui::Button("Save", ImVec2(buttonWidth, 0))) {
-            std::filesystem::create_directories("scenes");
-            std::string fileName = "scenes/" + sceneToSave + ".scene";
+            std::filesystem::create_directories("resources/scenes");
+            std::string fileName = "resources/scenes/" + sceneToSave + ".scene";
             SceneSerializer::SaveScene(SceneManager::Instance().GetActiveScene(), fileName);
             showSaveConfirm = false;
             sceneToSave = "";
@@ -3284,8 +3284,8 @@ void DebugUI::UpdateAutoSave(SceneManager* sceneManager) {
     Scene* activeScene = sceneManager->GetActiveScene();
     if (!activeScene) return;
 
-    std::filesystem::create_directories("scenes");
-    std::string fileName = "scenes/" + sceneManager->GetActiveSceneName() + "_autosave.scene";
+    std::filesystem::create_directories("resources/scenes");
+    std::string fileName = "resources/scenes/" + sceneManager->GetActiveSceneName() + "_autosave.scene";
     SceneSerializer::SaveScene(activeScene, fileName);
     lastAutoSaveStatus = "Auto-saved at " + std::to_string(static_cast<int>(ImGui::GetTime())) + "s";
 }
@@ -3453,8 +3453,8 @@ void DebugUI::DrawSceneSelector(SceneManager* sceneManager) {
     ImGuiLayoutUtils::SameLineOrWrap(buttonWidth("Save"), false);
     if (ImGui::Button("Save##btn")) {
         if (sceneManager->GetActiveScene()) {
-            std::filesystem::create_directories("scenes");
-            std::string fileName = "scenes/" + sceneManager->GetActiveSceneName() + ".scene";
+            std::filesystem::create_directories("resources/scenes");
+            std::string fileName = "resources/scenes/" + sceneManager->GetActiveSceneName() + ".scene";
             SceneSerializer::SaveScene(sceneManager->GetActiveScene(), fileName);
         }
     }
